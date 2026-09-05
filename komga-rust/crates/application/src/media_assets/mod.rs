@@ -16,6 +16,7 @@ mod epub_navigation;
 #[cfg(test)]
 mod epub_navigation_tests;
 mod manifest_builder;
+mod metadata_contributions;
 mod metadata_update;
 mod metadata_writer;
 mod page_retrieval;
@@ -63,6 +64,7 @@ pub use manifest_builder::{
     ManifestReaderPort, ManifestReadingProgression, ManifestVariant, PersistedManifest,
     build_persisted_book_manifest,
 };
+pub use metadata_contributions::SeriesMetadataContributionCleanupPort;
 pub use metadata_update::{
     BookMetadata, BookMetadataAuthor, BookMetadataBatchUpdateOutcome, BookMetadataLink,
     BookMetadataPatch, BookMetadataPort, BookMetadataService, BookMetadataUpdate,

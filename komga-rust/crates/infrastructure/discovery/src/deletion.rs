@@ -85,12 +85,17 @@ pub async fn delete_series_dependency_rows(
     Ok(())
 }
 
-pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> anyhow::Result<()> {
+pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> anyhow::Result<Vec<String>> {
     let mut tx = pool
         .begin()
         .await
         .context("failed to start empty-trash transaction")?;
 
+    let affected_book_ids = load_empty_trash_book_ids(&mut tx, library_id)
+        .await
+        .with_context(|| {
+            format!("failed to load deleted books for empty-trash library '{library_id}'")
+        })?;
     let affected_series_ids = load_empty_trash_affected_series_ids(&mut tx, library_id)
         .await
         .map_err(|error| {
@@ -189,7 +194,31 @@ pub async fn empty_trash_rows(pool: &SqlitePool, library_id: &str) -> anyhow::Re
         ))
     })?;
 
-    Ok(())
+    Ok(affected_book_ids)
+}
+
+async fn load_empty_trash_book_ids(
+    tx: &mut Transaction<'_, Sqlite>,
+    library_id: &str,
+) -> anyhow::Result<Vec<String>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT ID
+        FROM BOOK
+        WHERE LIBRARY_ID = ?
+          AND DELETED_DATE IS NOT NULL
+        ORDER BY ID ASC
+        "#,
+    )
+    .bind(library_id)
+    .fetch_all(&mut **tx)
+    .await
+    .context("query deleted book ids")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("ID"))
+        .collect())
 }
 
 async fn load_empty_trash_affected_series_ids(

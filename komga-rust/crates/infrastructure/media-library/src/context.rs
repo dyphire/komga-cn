@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
+use komga_application::media_assets::SeriesMetadataContributionCleanupPort;
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::SqlitePool;
 
@@ -13,6 +14,7 @@ pub struct MediaLibraryJobContext {
     owns_filesystem_scan_output: bool,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
     runtime_state: Arc<MediaLibraryRuntimeState>,
+    contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
 }
 
 #[derive(Default)]
@@ -35,6 +37,7 @@ impl MediaLibraryJobContext {
         owns_main_database: bool,
         owns_filesystem_scan_output: bool,
         runtime_events: Arc<dyn RuntimeSseEventSink>,
+        contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
     ) -> Self {
         Self {
             main_db,
@@ -42,6 +45,7 @@ impl MediaLibraryJobContext {
             owns_filesystem_scan_output,
             runtime_events,
             runtime_state: Arc::new(MediaLibraryRuntimeState::default()),
+            contribution_cleanup,
         }
     }
 
@@ -59,6 +63,12 @@ impl MediaLibraryJobContext {
 
     pub fn runtime_events_arc(&self) -> Arc<dyn RuntimeSseEventSink> {
         self.runtime_events.clone()
+    }
+
+    pub(crate) fn contribution_cleanup(
+        &self,
+    ) -> Option<Arc<dyn SeriesMetadataContributionCleanupPort>> {
+        self.contribution_cleanup.clone()
     }
 
     pub fn book_conversion_failed_before(&self, book_id: &str) -> bool {

@@ -1123,10 +1123,10 @@ mod tests {
 
     use crate::{TaskRuntimeContextParams, TaskRuntimeOwnership};
     use komga_application::runtime_sse::RuntimeSseEventStore;
-    use komga_infrastructure_base::DatabaseHandle;
     use komga_infrastructure_base::sqlite::{
-        connect_task_pool, connect_task_write_pool, default_read_max_connections,
+        connect_task_pool, connect_task_write_pool, default_read_max_connections, schema,
     };
+    use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
 
     async fn runtime_context() -> TaskRuntimeContext {
         let root = std::env::temp_dir().join(format!(
@@ -1141,9 +1141,15 @@ mod tests {
         let task_write_pool = connect_task_write_pool(&db_path)
             .await
             .expect("test private write pool should open");
+        schema::bootstrap_pool(&task_write_pool)
+            .await
+            .expect("test main schema should bootstrap");
         let task_read_pool = connect_task_pool(&db_path, default_read_max_connections())
             .await
             .expect("test private read pool should open");
+        let riir_db = RiirDatabase::file_backed(&root.join("riir.sqlite"))
+            .await
+            .expect("test RIIR database should open");
         TaskRuntimeContext::new(TaskRuntimeContextParams {
             main_db: DatabaseHandle::file_backed(db_path)
                 .await
@@ -1156,7 +1162,37 @@ mod tests {
             task_write_pool,
             task_read_pool,
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: Some(riir_db),
         })
+    }
+
+    #[tokio::test]
+    async fn cleanup_policy_reads_from_read_pool_when_write_pool_is_busy() {
+        let runtime = runtime_context().await;
+        let job = runtime.job();
+        let database = job.database();
+        let transaction = database
+            .task_write_pool()
+            .begin()
+            .await
+            .expect("test task write pool transaction should begin");
+
+        let _policy = tokio::time::timeout(
+            Duration::from_millis(50),
+            runtime.job().cleanup_empty_sets_policy(),
+        )
+        .await
+        .expect("cleanup policy should not wait on the busy write pool")
+        .expect("cleanup policy should load");
+
+        transaction
+            .rollback()
+            .await
+            .expect("test task write transaction should roll back");
+        database.task_write_pool().close().await;
+        database.task_read_pool().close().await;
+        database.main_db().write_pool().close().await;
+        database.main_db().read_pool().close().await;
     }
 
     #[tokio::test]

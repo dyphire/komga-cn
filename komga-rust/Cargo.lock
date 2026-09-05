@@ -2780,6 +2780,7 @@ dependencies = [
  "sqlx",
  "time",
  "tokio",
+ "tracing",
  "unicode-normalization",
 ]
 
@@ -2904,6 +2905,7 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tokio",
+ "tracing",
  "unrar",
  "zip 9.0.0-pre3",
 ]
@@ -2929,6 +2931,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "url",
  "zip 9.0.0-pre3",
 ]

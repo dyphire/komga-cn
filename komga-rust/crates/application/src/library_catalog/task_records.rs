@@ -1,5 +1,6 @@
 use crate::task_processing::{
-    BookSeriesRef, LibraryTaskCommand, TaskQueueRecord, TaskSchedule, emit_library_task_batch,
+    BookPayload, BookSeriesRef, LibraryTaskCommand, TaskKind, TaskQueueRecord, TaskRequest,
+    TaskSchedule, emit_library_task_batch,
 };
 
 use super::{LibraryBookSeriesRecord, LibraryRecord};
@@ -62,6 +63,22 @@ pub(super) fn metadata_refresh_task_records(
         books: task_book_series_refs(books),
     })
     .into_queue_records()
+}
+
+pub(super) fn book_metadata_refresh_task_records(
+    books: Vec<LibraryBookSeriesRecord>,
+) -> Vec<TaskQueueRecord> {
+    books
+        .into_iter()
+        .map(|book| {
+            TaskRequest::with_payload(
+                TaskKind::RefreshBookMetadata,
+                BookPayload::new(&book.book_id),
+            )
+            .group(book.series_id)
+            .into_queue_record()
+        })
+        .collect()
 }
 
 pub(super) fn empty_trash_task_records(library_id: &str) -> Vec<TaskQueueRecord> {

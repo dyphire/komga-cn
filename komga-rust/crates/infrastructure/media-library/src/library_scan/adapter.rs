@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::MediaLibraryJobContext;
+use komga_application::media_assets::SeriesMetadataContributionCleanupPort;
 use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventStore};
 use komga_application::task_processing::{
     CleanupEmptySetsPolicy, LibraryScanInterval, LibraryScanPipeline, LibraryScanProfile,
@@ -57,6 +58,7 @@ pub struct SqliteFilesystemLibraryScanPipeline {
     task_write_pool: SqlitePool,
     cleanup_empty_sets_policy: CleanupEmptySetsPolicy,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
+    contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
 }
 
 impl SqliteFilesystemLibraryScanPipeline {
@@ -71,6 +73,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             task_write_pool: runtime.database().write_pool().clone(),
             cleanup_empty_sets_policy,
             runtime_events: runtime.runtime_events_arc(),
+            contribution_cleanup: runtime.contribution_cleanup(),
         })
     }
 
@@ -196,9 +199,21 @@ impl SqliteFilesystemLibraryScanPipeline {
             return Ok(());
         }
 
-        empty_trash_rows(&self.task_write_pool, library_id)
+        let deleted_book_ids = empty_trash_rows(&self.task_write_pool, library_id)
             .await
-            .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))
+            .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))?;
+        if let Some(cleanup) = &self.contribution_cleanup
+            && !deleted_book_ids.is_empty()
+            && let Err(error) = cleanup.delete_book_contributions(&deleted_book_ids).await
+        {
+            tracing::warn!(
+                event = "riir_contribution_cleanup",
+                operation = "empty_trash_after_scan",
+                library_id,
+                "failed to clean up series metadata contributions: {error:#}"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -213,6 +228,7 @@ impl Default for SqliteFilesystemLibraryScanPipeline {
             task_write_pool: pool,
             cleanup_empty_sets_policy: CleanupEmptySetsPolicy::default(),
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            contribution_cleanup: None,
         }
     }
 }
@@ -261,6 +277,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             task_write_pool: write_pool,
             cleanup_empty_sets_policy: CleanupEmptySetsPolicy::default(),
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            contribution_cleanup: None,
         }
     }
 

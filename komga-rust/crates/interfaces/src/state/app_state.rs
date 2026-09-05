@@ -124,16 +124,33 @@ pub struct OperationalState {
     pub shutdown_trigger: Option<ShutdownTrigger>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SseConnectionState {
     accepting_connections: Arc<Mutex<bool>>,
+    shutdown_tx: watch::Sender<bool>,
+}
+
+impl Default for SseConnectionState {
+    fn default() -> Self {
+        Self::accepting()
+    }
 }
 
 impl SseConnectionState {
     pub fn accepting() -> Self {
+        let (shutdown_tx, _) = watch::channel(false);
+        Self::accepting_with_shutdown(shutdown_tx)
+    }
+
+    pub fn accepting_with_shutdown(shutdown_tx: watch::Sender<bool>) -> Self {
         Self {
             accepting_connections: Arc::new(Mutex::new(true)),
+            shutdown_tx,
         }
+    }
+
+    pub fn shutdown_receiver(&self) -> watch::Receiver<bool> {
+        self.shutdown_tx.subscribe()
     }
 
     pub fn is_accepting(&self) -> bool {

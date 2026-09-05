@@ -97,6 +97,7 @@ async fn run_refresh_book_metadata(
 
     let outcome = refresh_book_metadata(
         runtime.database().task_write_pool(),
+        Some(runtime.riir_db().map_err(TaskProcessingError::runtime)?),
         runtime.runtime_events(),
         book_id,
         capabilities,
@@ -129,6 +130,7 @@ async fn run_refresh_series_metadata(
 
     refresh_series_metadata(
         runtime.database().task_write_pool(),
+        Some(runtime.riir_db().map_err(TaskProcessingError::runtime)?),
         runtime.runtime_events(),
         series_id,
     )

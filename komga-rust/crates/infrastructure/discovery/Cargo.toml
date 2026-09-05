@@ -16,6 +16,7 @@ serde.workspace = true
 sqlx.workspace = true
 time.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]

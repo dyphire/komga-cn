@@ -15,20 +15,20 @@ fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
         .enable_all()
         .build()
         .expect("worker spawn lifecycle test runtime should build");
-    let ctx = runtime.block_on(TestFixture::new("worker-spawn-lifecycle"));
+    let ctx = runtime.block_on(
+        TestFixture::builder("worker-spawn-lifecycle")
+            .without_runtime_workers()
+            .build(),
+    );
     let config = ctx.config().clone();
-    let runtime = runtime.block_on(runtime_task_context(ctx.paths()));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
-        let runtime = runtime.clone();
         async move {
             async move {
-                let background = komga_infrastructure_jobs::prepare_task_queue(
-                    runtime_task_context_from_config(&config).await,
-                    None,
-                )
-                .await;
+                let runtime = runtime_task_context_from_config(&config).await;
+                let background =
+                    komga_infrastructure_jobs::prepare_task_queue(runtime.clone(), None).await;
                 background.spawn_workers(runtime, None);
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
@@ -73,20 +73,20 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
         .enable_all()
         .build()
         .expect("worker shutdown signal test runtime should build");
-    let ctx = runtime.block_on(TestFixture::new("worker-shutdown-signal"));
+    let ctx = runtime.block_on(
+        TestFixture::builder("worker-shutdown-signal")
+            .without_runtime_workers()
+            .build(),
+    );
     let config = ctx.config().clone();
-    let runtime = runtime.block_on(runtime_task_context(ctx.paths()));
 
     let logs = capture_router_logs_async_result(&config, {
         let config = config.clone();
-        let runtime = runtime.clone();
         async move {
             async move {
-                let background = komga_infrastructure_jobs::prepare_task_queue(
-                    runtime_task_context_from_config(&config).await,
-                    None,
-                )
-                .await;
+                let runtime = runtime_task_context_from_config(&config).await;
+                let background =
+                    komga_infrastructure_jobs::prepare_task_queue(runtime.clone(), None).await;
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
                 background.spawn_workers(runtime, Some(shutdown_rx));
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -616,6 +616,7 @@ fn authentication_cleanup_logs_skip_complete_and_failure_boundaries() {
             task_write_pool,
             task_read_pool,
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: None,
         })
     });
     let failure_logs = capture_router_logs_async_result(&log_config, async move {

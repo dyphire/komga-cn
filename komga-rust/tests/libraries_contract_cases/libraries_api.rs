@@ -652,6 +652,27 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
         .expect("aggregation tag should be seeded");
     pool.close().await;
 
+    let riir_pool = connect_test_pool(ctx.paths().riir_db_file.as_path(), 1)
+        .await
+        .expect("library delete RIIR seed db should open");
+    for provider in ["COMICINFO", "EPUB"] {
+        sqlx::query(
+            "INSERT INTO SERIES_METADATA_CONTRIBUTION (BOOK_ID, PROVIDER, SOURCE_FILE_LAST_MODIFIED_SECONDS, SOURCE_FILE_SIZE, SOURCE_MEDIA_TYPE, SOURCE_MEDIA_MODIFIED_SECONDS, PAYLOAD_FORMAT_VERSION, OUTCOME) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind(provider)
+        .bind(1_i64)
+        .bind(2_i64)
+        .bind("application/zip")
+        .bind(3_i64)
+        .bind(1_i64)
+        .bind("ABSENT")
+        .execute(&riir_pool)
+        .await
+        .expect("library delete RIIR contribution should be seeded");
+    }
+    riir_pool.close().await;
+
     let auth_token = ctx.login_admin().await;
 
     let response = ctx
@@ -776,6 +797,60 @@ async fn router_api_library_delete_cascades_library_rows_like_kotlin() {
         )
         .await,
         0
+    );
+
+    let riir_pool = connect_test_pool(ctx.paths().riir_db_file.as_path(), 1)
+        .await
+        .expect("library delete RIIR verification db should open");
+    let remaining_contributions = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM SERIES_METADATA_CONTRIBUTION WHERE BOOK_ID = ?",
+    )
+    .bind("book-1")
+    .fetch_one(&riir_pool)
+    .await
+    .expect("library delete RIIR contribution count should be queryable");
+    riir_pool.close().await;
+    assert_eq!(remaining_contributions, 0);
+}
+
+#[tokio::test]
+async fn router_api_library_delete_succeeds_when_riir_cleanup_fails() {
+    let ctx = TestFixture::new("router-api-library-delete-riir-cleanup-failure").await;
+
+    let riir_pool = connect_test_pool(ctx.paths().riir_db_file.as_path(), 1)
+        .await
+        .expect("library delete RIIR failure db should open");
+    sqlx::query("DROP TABLE SERIES_METADATA_CONTRIBUTION")
+        .execute(&riir_pool)
+        .await
+        .expect("RIIR contribution table should be removable for failure fixture");
+    riir_pool.close().await;
+
+    let auth_token = ctx.login_admin().await;
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/libraries/library-1")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("library delete RIIR failure request should build"),
+        )
+        .await
+        .expect("library delete RIIR failure request should complete");
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        count_query_rows(
+            ctx.paths(),
+            "SELECT COUNT(*) AS COUNT FROM LIBRARY WHERE ID = ?",
+            "library-1",
+        )
+        .await,
+        0,
+        "main database deletion must remain committed when RIIR cleanup fails",
     );
 }
 

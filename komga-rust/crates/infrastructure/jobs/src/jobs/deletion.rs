@@ -7,12 +7,23 @@ pub(crate) async fn execute_empty_trash(
     library_id: &str,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     if runtime.database().owns_main_database() {
-        komga_infrastructure_discovery::empty_trash_rows(
+        let deleted_book_ids = komga_infrastructure_discovery::empty_trash_rows(
             runtime.database().task_write_pool(),
             library_id,
         )
         .await
         .map_err(TaskProcessingError::runtime)?;
+        if !deleted_book_ids.is_empty()
+            && let Some(cleanup) = runtime.contribution_cleanup()
+            && let Err(error) = cleanup.delete_book_contributions(&deleted_book_ids).await
+        {
+            tracing::warn!(
+                event = "riir_contribution_cleanup",
+                operation = "empty_trash",
+                library_id,
+                "failed to clean up series metadata contributions: {error:#}"
+            );
+        }
         let policy = runtime
             .cleanup_empty_sets_policy()
             .await

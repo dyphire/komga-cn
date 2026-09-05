@@ -181,6 +181,7 @@ mod tests {
                 true,
                 true,
                 Arc::new(RuntimeSseEventStore::default()),
+                None,
             )
         }
 

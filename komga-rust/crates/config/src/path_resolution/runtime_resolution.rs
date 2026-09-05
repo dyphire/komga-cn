@@ -246,6 +246,8 @@ pub(crate) fn resolve_with_env(
     let derived_paths =
         resolve_derived_runtime_paths(cli, env, &layered, &resolved_config_dir, platform_profile);
 
+    derived_paths.validate_riir_db_path()?;
+
     let oauth2_clients = resolve_oauth2_clients_for_startup_slice(&layered, env);
     let oauth2_account_creation = resolve_oauth2_account_creation(&layered, env)?;
     let oidc_email_verification = resolve_oidc_email_verification(&layered, env)?;
@@ -270,6 +272,7 @@ pub(crate) fn resolve_with_env(
         database_server_context_path: None,
         log_file: derived_paths.log_file,
         database_file: derived_paths.database_file,
+        riir_db_file: derived_paths.riir_db_file,
         tasks_db_file: derived_paths.tasks_db_file,
         lucene_data_directory: derived_paths.lucene_data_directory,
         fonts_data_directory: derived_paths.fonts_data_directory,
@@ -358,5 +361,40 @@ mod tests {
             .expect_err("invalid config boolean should fail startup config resolution");
 
         assert!(matches!(error, ConfigError::InvalidBoolean(value) if value == "maybe"));
+    }
+
+    #[test]
+    fn rejects_riir_database_path_collisions() {
+        let config_dir = TempConfigDir::new("riir-path-collisions");
+        let cli = RuntimeCli {
+            config_dir: Some(config_dir.0.clone()),
+            ..RuntimeCli::default()
+        };
+        let riir_path = config_dir.0.join("riir.sqlite");
+        let config = resolve_with_env(&cli, &BTreeMap::new())
+            .expect("distinct default storage paths should be accepted");
+        assert_eq!(config.riir_db_file, riir_path);
+
+        for (env_key, expected_setting) in [
+            ("KOMGA_DATABASE_FILE", "komga.database.file"),
+            ("KOMGA_TASKS_DB_FILE", "komga.tasks-db.file"),
+            ("LOGGING_FILE_NAME", "logging.file.name"),
+            ("KOMGA_LUCENE_DATA_DIRECTORY", "komga.lucene.data-directory"),
+            ("KOMGA_FONTS_DATA_DIRECTORY", "komga.fonts.data-directory"),
+        ] {
+            let env = BTreeMap::from([(env_key.to_string(), riir_path.display().to_string())]);
+            let error = resolve_with_env(&cli, &env)
+                .expect_err("RIIR storage path collisions should fail config resolution");
+            assert!(
+                matches!(
+                    &error,
+                    ConfigError::RiirStoragePathCollision { path, conflicting_setting }
+                        if path == &riir_path && *conflicting_setting == expected_setting
+                ),
+                "{env_key}: {error}",
+            );
+            assert!(error.to_string().contains(expected_setting));
+            assert!(!riir_path.exists(), "validation must not open the database");
+        }
     }
 }

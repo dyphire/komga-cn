@@ -50,6 +50,7 @@ pub struct RuntimeConfig {
     pub database_server_context_path: Option<String>,
     pub log_file: PathBuf,
     pub database_file: PathBuf,
+    pub riir_db_file: PathBuf,
     pub tasks_db_file: PathBuf,
     pub lucene_data_directory: PathBuf,
     pub fonts_data_directory: PathBuf,
@@ -122,6 +123,7 @@ impl RuntimeConfig {
             .parse()
             .expect("default bind address should parse");
         let server_context_path = Some(String::new());
+        let database_file = config_dir.join("database.sqlite");
         Self {
             bind_address,
             configuration_bind_address: bind_address,
@@ -140,7 +142,8 @@ impl RuntimeConfig {
             database_server_port: None,
             database_server_context_path: None,
             log_file: default_log_file_for_config_dir(&config_dir),
-            database_file: config_dir.join("database.sqlite"),
+            riir_db_file: super::path_resolution::riir_db_file_for(&database_file),
+            database_file,
             tasks_db_file: config_dir.join("tasks.sqlite"),
             lucene_data_directory: config_dir.join("lucene"),
             fonts_data_directory: config_dir.join("fonts"),

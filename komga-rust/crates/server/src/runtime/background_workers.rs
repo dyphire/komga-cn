@@ -1,5 +1,6 @@
 use axum::Extension;
 use axum::Router;
+use komga_application::media_assets::SeriesMetadataContributionCleanupPort;
 use komga_application::task_processing::TaskQueueAdmin;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::profile::RuntimeProfile;
@@ -33,6 +34,7 @@ pub(crate) struct HttpRuntimeParts {
     pub(crate) tasks_db: DatabaseHandle,
     pub(crate) task_engine: Box<dyn TaskQueueAdmin>,
     pub(crate) runtime_events: Arc<RuntimeSseEventHub>,
+    pub(crate) contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
 }
 
 pub(crate) struct RouterRuntimeLifecycle {
@@ -91,6 +93,7 @@ pub(crate) async fn start_task_runtime_with_events(
         TaskRuntimeMode::WorkersDisabled => None,
     };
     let task_engine = background.task_engine();
+    let contribution_cleanup = runtime.job().contribution_cleanup();
 
     Ok(TaskRouterParts {
         http: HttpRuntimeParts {
@@ -98,6 +101,7 @@ pub(crate) async fn start_task_runtime_with_events(
             tasks_db,
             task_engine,
             runtime_events,
+            contribution_cleanup,
         },
         lifecycle: RouterRuntimeLifecycle {
             worker_runtime_guard,

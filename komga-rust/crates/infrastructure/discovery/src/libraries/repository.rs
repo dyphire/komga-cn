@@ -3,6 +3,7 @@ use komga_application::library_catalog::{
     LibraryBookSeriesRecord, LibraryCatalogMutationPort, LibraryCatalogReadPort, LibraryRecord,
     LibraryScanInterval, LibrarySeriesAndBookIds, LibrarySeriesCover,
 };
+use komga_application::media_assets::SeriesMetadataContributionCleanupPort;
 use komga_application::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
@@ -22,6 +23,7 @@ pub(super) struct SqliteLibraryCatalogAdapter {
     read_pool: SqlitePool,
     write_pool: SqlitePool,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
+    contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
 }
 
 impl SqliteLibraryCatalogAdapter {
@@ -29,11 +31,13 @@ impl SqliteLibraryCatalogAdapter {
         read_pool: SqlitePool,
         write_pool: SqlitePool,
         runtime_events: Arc<dyn RuntimeSseEventSink>,
+        contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
     ) -> Self {
         Self {
             read_pool,
             write_pool,
             runtime_events,
+            contribution_cleanup,
         }
     }
 }
@@ -102,10 +106,27 @@ impl LibraryCatalogMutationPort for SqliteLibraryCatalogAdapter {
     }
 
     async fn delete_library(&self, library_id: &str) -> anyhow::Result<bool> {
+        let book_ids = if self.contribution_cleanup.is_some() {
+            library_book_ids(&self.read_pool, library_id)
+                .await
+                .context("load library book ids before deletion")?
+        } else {
+            None
+        };
         let deleted = delete_persisted_library(&self.write_pool, library_id)
             .await
             .context("delete persisted library")?;
         if deleted {
+            if let (Some(cleanup), Some(book_ids)) = (&self.contribution_cleanup, book_ids)
+                && let Err(error) = cleanup.delete_book_contributions(&book_ids).await
+            {
+                tracing::warn!(
+                    event = "riir_contribution_cleanup",
+                    operation = "delete_library",
+                    library_id,
+                    "failed to clean up series metadata contributions: {error:#}"
+                );
+            }
             self.runtime_events
                 .register(RuntimeSseEvent::LibraryDeleted {
                     library_id: library_id.to_string(),

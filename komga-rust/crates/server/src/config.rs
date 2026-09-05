@@ -4,7 +4,8 @@ use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_config::env_config::RuntimeConfig;
 use komga_config::writer_ownership::WriterKind;
 use komga_infrastructure_base::{
-    DatabaseHandle, connect_task_pool, connect_task_write_pool, default_read_max_connections,
+    DatabaseHandle, RiirDatabase, connect_task_pool, connect_task_write_pool,
+    default_read_max_connections,
 };
 use komga_infrastructure_jobs::{
     TaskRuntimeContext, TaskRuntimeContextParams, TaskRuntimeOwnership,
@@ -23,6 +24,15 @@ pub(crate) async fn task_runtime_context(
     let task_read_pool = connect_task_pool(main_db.database_file(), default_read_max_connections())
         .await
         .expect("failed to create private read pool");
+    let riir_db = if config.owns_riir_database() {
+        Some(
+            RiirDatabase::file_backed(&config.riir_db_file)
+                .await
+                .expect("failed to initialize RIIR database"),
+        )
+    } else {
+        None
+    };
     TaskRuntimeContext::new(TaskRuntimeContextParams {
         main_db,
         tasks_db_file: config.tasks_db_file.clone(),
@@ -48,5 +58,6 @@ pub(crate) async fn task_runtime_context(
         task_write_pool,
         task_read_pool,
         runtime_events,
+        riir_db,
     })
 }

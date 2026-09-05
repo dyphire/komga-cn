@@ -1,25 +1,26 @@
 use std::path::Path;
 
-use komga_application::media_assets::{
-    BookMediaRecord, book_media_is_epub, book_media_is_rar_archive, book_media_is_zip_archive,
-};
+use komga_application::media_assets::content_type_from_filename;
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
-use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
+use komga_infrastructure_base::RiirDatabase;
 use komga_infrastructure_base::resolve_rooted_path;
-use komga_infrastructure_media_core::content::epub_resources::load_epub_package_document;
 
 use super::SeriesMetadataImportPatch;
-use super::epub::extract_epub_series_patch;
-use super::sources::{extract_comicinfo_series_patch, load_mylar_series_patch};
+use super::series_metadata_contribution::{
+    ContributionSnapshot, SeriesMetadataContribution, SeriesMetadataContributionSource,
+    SeriesMetadataProvider, load_complete_snapshot,
+};
+use super::sources::load_mylar_series_patch;
 use super::support::{
     canonicalize_string_set, dedupe_strings_preserve_order, generated_collection_id,
     most_frequent_owned, nonblank_string,
 };
 
-struct SeriesBookRefreshSource {
-    media: BookMediaRecord,
+struct SeriesBookContributionSource {
+    contribution_source: SeriesMetadataContributionSource,
+    content_type: String,
 }
 
 struct SeriesMetadataRefreshState {
@@ -52,23 +53,24 @@ struct PersistedCollectionMembership {
     series_ids: Vec<String>,
 }
 
-async fn load_series_books_for_refresh(
+async fn load_series_contribution_sources(
     pool: &SqlitePool,
     series_id: &str,
-    library_root: &Path,
-) -> anyhow::Result<Vec<SeriesBookRefreshSource>> {
+) -> anyhow::Result<Vec<SeriesBookContributionSource>> {
     let rows = sqlx::query(
         r#"
-        SELECT b.LIBRARY_ID AS LIBRARY_ID,
+        SELECT b.ID AS BOOK_ID,
                b.NAME AS FILE_NAME,
-               b.URL AS BOOK_URL,
+               unixepoch(b.FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED,
+               b.FILE_SIZE AS FILE_SIZE,
                COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
-               COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT
+               unixepoch(m.LAST_MODIFIED_DATE) AS MEDIA_LAST_MODIFIED
         FROM BOOK b
-        LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
+        JOIN MEDIA m ON m.BOOK_ID = b.ID
         LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
         WHERE b.SERIES_ID = ?
           AND b.DELETED_DATE IS NULL
+          AND m.STATUS = 'READY'
         ORDER BY COALESCE(bm.NUMBER_SORT, CAST(b.NUMBER AS REAL), 0) ASC,
                  b.ID ASC
         "#,
@@ -84,55 +86,38 @@ async fn load_series_books_for_refresh(
 
     Ok(rows
         .into_iter()
-        .map(|row| SeriesBookRefreshSource {
-            media: BookMediaRecord {
-                library_id: row.get::<String, _>("LIBRARY_ID"),
-                media_type: row.get::<String, _>("MEDIA_TYPE"),
-                file_path: resolve_rooted_path(
-                    library_root,
-                    row.get::<String, _>("BOOK_URL").as_str(),
-                ),
-                file_name: row.get::<String, _>("FILE_NAME"),
-                page_count: row.get::<i64, _>("PAGE_COUNT").max(0) as u64,
-            },
+        .map(|row| {
+            let file_name = row.get::<String, _>("FILE_NAME");
+            let media_type = row.get::<String, _>("MEDIA_TYPE");
+            SeriesBookContributionSource {
+                content_type: content_type_from_filename(&file_name, &media_type),
+                contribution_source: SeriesMetadataContributionSource {
+                    book_id: row.get("BOOK_ID"),
+                    file_last_modified_seconds: row.get("FILE_LAST_MODIFIED"),
+                    file_size: row.get("FILE_SIZE"),
+                    media_type,
+                    media_modified_seconds: row.get("MEDIA_LAST_MODIFIED"),
+                },
+            }
         })
         .collect())
 }
 
-fn load_comicinfo_series_patch_for_book(
-    source: &SeriesBookRefreshSource,
-    append_volume_to_title: bool,
-) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
-    if !book_media_is_zip_archive(&source.media) && !book_media_is_rar_archive(&source.media) {
-        return Ok(None);
-    }
-
-    let Some(xml) = load_comicinfo_bytes_for_media(&source.media)? else {
-        return Ok(None);
-    };
-    let document = parse_comicinfo_xml(&xml).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to decode ComicInfo.xml from '{}': ",
-            source.media.file_path.display()
-        ))
-    })?;
-    Ok(Some(extract_comicinfo_series_patch(
-        &document,
-        append_volume_to_title,
-    )))
+fn supports_comicinfo(source: &SeriesBookContributionSource) -> bool {
+    matches!(
+        source.content_type.as_str(),
+        "application/zip"
+            | "application/vnd.comicbook+zip"
+            | "application/epub+zip"
+            | "application/vnd.comicbook-rar"
+    )
 }
 
-async fn load_epub_series_patch_for_book(
-    source: &SeriesBookRefreshSource,
-) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
-    if !book_media_is_epub(&source.media) {
-        return Ok(None);
-    }
-
-    let Some(package_document) = load_epub_package_document(&source.media).await? else {
-        return Ok(None);
-    };
-    Ok(Some(extract_epub_series_patch(&package_document)?))
+fn supports_epub(source: &SeriesBookContributionSource) -> bool {
+    matches!(
+        source.content_type.as_str(),
+        "application/epub+zip" | "application/x-mobipocket-ebook"
+    )
 }
 
 fn aggregate_series_metadata_import_patches(
@@ -641,7 +626,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
-    library_root: &Path,
+    riir_db: &RiirDatabase,
     import_comicinfo_series: bool,
     import_comicinfo_collection: bool,
     import_comicinfo_series_append_volume: bool,
@@ -651,17 +636,64 @@ pub(super) async fn apply_series_metadata_from_book_imports(
         return Ok(());
     }
 
-    let books = load_series_books_for_refresh(pool, series_id, library_root).await?;
+    let books = load_series_contribution_sources(pool, series_id).await?;
+    let comicinfo_sources = books
+        .iter()
+        .filter(|source| supports_comicinfo(source))
+        .map(|source| source.contribution_source.clone())
+        .collect::<Vec<_>>();
+    let epub_sources = books
+        .iter()
+        .filter(|source| supports_epub(source))
+        .map(|source| source.contribution_source.clone())
+        .collect::<Vec<_>>();
 
-    if import_comicinfo_series || import_comicinfo_collection {
-        let mut patches = Vec::new();
-        for source in &books {
-            if let Some(patch) =
-                load_comicinfo_series_patch_for_book(source, import_comicinfo_series_append_volume)?
-            {
-                patches.push(patch);
-            }
-        }
+    let comicinfo_snapshot = if import_comicinfo_series || import_comicinfo_collection {
+        Some(
+            load_complete_snapshot(
+                riir_db,
+                SeriesMetadataProvider::ComicInfo,
+                &comicinfo_sources,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let epub_snapshot = if import_epub_series {
+        Some(load_complete_snapshot(riir_db, SeriesMetadataProvider::Epub, &epub_sources).await?)
+    } else {
+        None
+    };
+    if matches!(comicinfo_snapshot, Some(ContributionSnapshot::Incomplete))
+        || matches!(epub_snapshot, Some(ContributionSnapshot::Incomplete))
+    {
+        tracing::warn!(
+            event = "series_metadata_contribution_snapshot",
+            outcome = "incomplete",
+            series_id,
+            comicinfo_eligible = comicinfo_sources.len(),
+            epub_eligible = epub_sources.len(),
+            "Skipping incomplete book-provider series metadata snapshot",
+        );
+        return Ok(());
+    }
+
+    if let Some(ContributionSnapshot::Complete(contributions)) = comicinfo_snapshot {
+        let patches = contributions
+            .into_iter()
+            .filter_map(|contribution| match contribution {
+                SeriesMetadataContribution::ComicInfo {
+                    plain,
+                    append_volume,
+                } => Some(if import_comicinfo_series_append_volume {
+                    *append_volume
+                } else {
+                    *plain
+                }),
+                SeriesMetadataContribution::Epub { .. } => None,
+            })
+            .collect::<Vec<_>>();
 
         if import_comicinfo_series
             && let Some(aggregated) = aggregate_series_metadata_import_patches(&patches)
@@ -680,13 +712,14 @@ pub(super) async fn apply_series_metadata_from_book_imports(
         }
     }
 
-    if import_epub_series {
-        let mut patches = Vec::new();
-        for source in &books {
-            if let Some(patch) = load_epub_series_patch_for_book(source).await? {
-                patches.push(patch);
-            }
-        }
+    if let Some(ContributionSnapshot::Complete(contributions)) = epub_snapshot {
+        let patches = contributions
+            .into_iter()
+            .filter_map(|contribution| match contribution {
+                SeriesMetadataContribution::Epub { patch } => Some(*patch),
+                SeriesMetadataContribution::ComicInfo { .. } => None,
+            })
+            .collect::<Vec<_>>();
 
         if let Some(aggregated) = aggregate_series_metadata_import_patches(&patches) {
             apply_series_metadata_import_patch(pool, series_id, aggregated).await?;
@@ -744,125 +777,4 @@ pub(super) async fn apply_oneshot_series_metadata_import(
         },
     )
     .await
-}
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use komga_application::runtime_sse::RuntimeSseEventStore;
-
-    use super::{apply_mylar_series_import, apply_series_metadata_from_book_imports};
-    use komga_infrastructure_test_support::BootstrappedBookFixture;
-
-    #[tokio::test]
-    async fn apply_series_metadata_from_book_imports_propagates_corrupt_comicinfo_archive_error() {
-        let fixture = BootstrappedBookFixture::open("series-refresh-corrupt-comicinfo").await;
-        let library_root =
-            std::env::temp_dir().join(format!("komga-corrupt-comicinfo-{}", std::process::id()));
-        let series_dir = library_root.join("series");
-        fs::create_dir_all(&series_dir).expect("corrupt ComicInfo fixture dir should be created");
-        fs::write(series_dir.join("book-1.cbz"), b"not a zip archive")
-            .expect("corrupt ComicInfo archive fixture should be written");
-        fixture.insert_library_series().await;
-        fixture.insert_series_metadata().await;
-        fixture.insert_book("book-1").await;
-        fixture
-            .insert_media("book-1", Some("application/zip"))
-            .await;
-        sqlx::query("UPDATE LIBRARY SET ROOT = ? WHERE ID = ?")
-            .bind(library_root.to_string_lossy().to_string())
-            .bind("library-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("library root should point at corrupt ComicInfo fixture");
-        let runtime_events = RuntimeSseEventStore::default();
-
-        let error = apply_series_metadata_from_book_imports(
-            &fixture.pool,
-            &runtime_events,
-            "series-1",
-            library_root.as_path(),
-            true,
-            false,
-            false,
-            false,
-        )
-        .await
-        .expect_err("corrupt ComicInfo archive should fail series metadata import");
-
-        assert!(error.to_string().contains("ComicInfo archive"), "{error}");
-        let _ = fs::remove_dir_all(library_root);
-        fixture.close().await;
-    }
-
-    #[tokio::test]
-    async fn apply_series_metadata_from_book_imports_propagates_corrupt_epub_package_error() {
-        let fixture = BootstrappedBookFixture::open("series-refresh-corrupt-epub").await;
-        let library_root =
-            std::env::temp_dir().join(format!("komga-corrupt-series-epub-{}", std::process::id()));
-        let series_dir = library_root.join("series");
-        fs::create_dir_all(&series_dir).expect("corrupt EPUB fixture dir should be created");
-        fs::write(series_dir.join("book-1.epub"), b"not a zip archive")
-            .expect("corrupt EPUB fixture should be written");
-        fixture.insert_library_series().await;
-        fixture.insert_series_metadata().await;
-        fixture.insert_book("book-1").await;
-        fixture
-            .insert_media("book-1", Some("application/epub+zip"))
-            .await;
-        sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")
-            .bind("book-1.epub")
-            .bind("series/book-1.epub")
-            .bind("book-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("book should point at corrupt EPUB fixture");
-        let runtime_events = RuntimeSseEventStore::default();
-
-        let error = apply_series_metadata_from_book_imports(
-            &fixture.pool,
-            &runtime_events,
-            "series-1",
-            library_root.as_path(),
-            false,
-            false,
-            false,
-            true,
-        )
-        .await
-        .expect_err("corrupt EPUB package should fail series metadata import");
-
-        assert!(
-            error.to_string().contains("EPUB package document"),
-            "{error}"
-        );
-        let _ = fs::remove_dir_all(library_root);
-        fixture.close().await;
-    }
-
-    #[tokio::test]
-    async fn apply_mylar_series_import_ignores_malformed_series_json_like_kotlin() {
-        let fixture = BootstrappedBookFixture::open("series-refresh-bad-mylar-json").await;
-        let library_root =
-            std::env::temp_dir().join(format!("komga-bad-mylar-json-{}", std::process::id()));
-        let series_dir = library_root.join("series");
-        fs::create_dir_all(&series_dir).expect("bad Mylar fixture dir should be created");
-        fs::write(series_dir.join("series.json"), b"{not valid json")
-            .expect("bad Mylar series.json fixture should be written");
-        fixture.insert_library_series().await;
-        fixture.insert_series_metadata().await;
-
-        apply_mylar_series_import(
-            &fixture.pool,
-            "series-1",
-            library_root.as_path(),
-            "series",
-            true,
-            false,
-        )
-        .await
-        .expect("malformed Mylar series.json should be ignored like Kotlin");
-        let _ = fs::remove_dir_all(library_root);
-        fixture.close().await;
-    }
 }

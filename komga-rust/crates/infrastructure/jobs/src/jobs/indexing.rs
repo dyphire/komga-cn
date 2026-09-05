@@ -106,11 +106,11 @@ mod tests {
         BookPayload, FindBookThumbnailsToRegeneratePayload, TaskKind, TaskRequest,
     };
     use komga_domain::media_assets::ThumbnailType;
-    use komga_infrastructure_base::DatabaseHandle;
     use komga_infrastructure_base::sqlite::{
         connect_main_write_context, connect_task_pool, connect_task_write_pool, connect_test_pool,
         default_read_max_connections,
     };
+    use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
     use komga_infrastructure_media_library::analysis::analyze_book_media_file;
     use komga_infrastructure_search::SearchEntityType;
     use komga_infrastructure_tasks::TaskQueueScheduler;
@@ -178,6 +178,10 @@ mod tests {
         let task_read_pool = connect_task_pool(database_file, default_read_max_connections())
             .await
             .expect("test private read pool should open");
+        let riir_db_path = database_file.with_extension("riir.sqlite");
+        let riir_db = RiirDatabase::file_backed(&riir_db_path)
+            .await
+            .expect("test RIIR database should open");
         TaskRuntimeContext::new(TaskRuntimeContextParams {
             main_db: DatabaseHandle::file_backed(database_file.to_path_buf())
                 .await
@@ -193,7 +197,20 @@ mod tests {
             task_write_pool,
             task_read_pool,
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: Some(riir_db),
         })
+    }
+
+    async fn cleanup_riir_database(runtime: &TaskRuntimeContext, database_file: &Path) {
+        runtime
+            .job()
+            .riir_db()
+            .expect("test runtime should have a RIIR database")
+            .clone()
+            .close()
+            .await;
+        std::fs::remove_file(database_file.with_extension("riir.sqlite"))
+            .expect("test RIIR database should be removed");
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -659,6 +676,7 @@ mod tests {
             "full thumbnail regeneration should target every non-deleted book and keep the finder task priority for Kotlin parity",
         );
 
+        cleanup_riir_database(&runtime, &database_file).await;
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
     }
@@ -739,6 +757,7 @@ mod tests {
             "runtime policy should not enqueue thumbnails at or above the configured edge",
         );
 
+        cleanup_riir_database(&runtime, &database_file).await;
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
     }
@@ -1337,6 +1356,7 @@ mod tests {
             "2000-01-01 00:00:00"
         );
 
+        cleanup_riir_database(&runtime, &database_file).await;
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
     }
@@ -1545,6 +1565,7 @@ mod tests {
             "unchanged page counts must not refresh series read-progress aggregates",
         );
 
+        cleanup_riir_database(&runtime, &database_file).await;
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
     }

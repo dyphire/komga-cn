@@ -19,6 +19,7 @@ const TEMPLATE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 pub struct RuntimeDbPaths {
     pub config_dir: PathBuf,
     pub main_db: PathBuf,
+    pub riir_db_file: PathBuf,
     pub tasks_db: PathBuf,
 }
 
@@ -41,6 +42,7 @@ pub fn new_runtime_db_paths(case_id: &str) -> std::io::Result<RuntimeDbPaths> {
 
     Ok(RuntimeDbPaths {
         main_db: root.join("database.sqlite"),
+        riir_db_file: root.join("riir.sqlite"),
         tasks_db: root.join("tasks.sqlite"),
         config_dir: root,
     })
@@ -263,7 +265,11 @@ pub fn cleanup(paths: RuntimeDbPaths) {
 }
 
 pub async fn close_shared_pools(paths: &RuntimeDbPaths) {
-    for pool in evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]) {
+    for pool in evict_shared_pools_for_paths(&[
+        paths.main_db.clone(),
+        paths.riir_db_file.clone(),
+        paths.tasks_db.clone(),
+    ]) {
         pool.close().await;
     }
 }
@@ -275,7 +281,7 @@ pub async fn cleanup_async(paths: RuntimeDbPaths) {
 
 fn cleanup_files(paths: &RuntimeDbPaths) {
     for _ in 0..10 {
-        for db_path in [&paths.main_db, &paths.tasks_db] {
+        for db_path in [&paths.main_db, &paths.riir_db_file, &paths.tasks_db] {
             for path in sqlite_sidecar_paths(db_path) {
                 let _ = std::fs::remove_file(path);
             }
@@ -289,7 +295,11 @@ fn cleanup_files(paths: &RuntimeDbPaths) {
 }
 
 fn close_fixture_shared_pools(paths: &RuntimeDbPaths) {
-    let _ = evict_shared_pools_for_paths(&[paths.main_db.clone(), paths.tasks_db.clone()]);
+    let _ = evict_shared_pools_for_paths(&[
+        paths.main_db.clone(),
+        paths.riir_db_file.clone(),
+        paths.tasks_db.clone(),
+    ]);
 }
 
 fn sqlite_sidecar_paths(db_path: &Path) -> [PathBuf; 4] {

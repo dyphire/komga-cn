@@ -68,6 +68,7 @@ pub(super) fn runtime_config_for_logging_contract(
     config.config_dir = Some(root.clone());
     config.log_file = root.join("logs").join("komga.log");
     config.database_file = root.join("database.sqlite");
+    config.riir_db_file = root.join("riir.sqlite");
     config.tasks_db_file = root.join("tasks.sqlite");
     config.lucene_data_directory = root.join("lucene");
     config.fonts_data_directory = root.join("fonts");

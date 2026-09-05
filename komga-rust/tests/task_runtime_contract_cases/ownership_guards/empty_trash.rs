@@ -129,7 +129,7 @@ async fn runtime_empty_trash_uses_kotlin_like_natural_name_sort_for_remaining_se
 }
 
 #[tokio::test]
-async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_empty_series() {
+async fn runtime_empty_trash_deletes_series_dependents_and_book_contributions() {
     let ctx = TestFixture::new("runtime-empty-trash-deletes-series-dependents").await;
 
     let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -164,6 +164,25 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
         .expect("seeded book should be soft-deleted before empty-trash");
     pool.close().await;
 
+    let riir_db = RiirDatabase::file_backed(&ctx.paths().riir_db_file)
+        .await
+        .expect("RIIR db should open for empty-trash fixture setup");
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA_CONTRIBUTION (BOOK_ID, PROVIDER, SOURCE_FILE_LAST_MODIFIED_SECONDS, SOURCE_FILE_SIZE, SOURCE_MEDIA_TYPE, SOURCE_MEDIA_MODIFIED_SECONDS, PAYLOAD_FORMAT_VERSION, OUTCOME) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("EPUB")
+    .bind(1_i64)
+    .bind(2_i64)
+    .bind("application/epub+zip")
+    .bind(3_i64)
+    .bind(1_i64)
+    .bind("ABSENT")
+    .execute(riir_db.write_pool())
+    .await
+    .expect("RIIR contribution should be seeded for empty-trash");
+    riir_db.close().await;
+
     run_empty_trash(ctx.paths()).await;
 
     let verify_pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
@@ -181,6 +200,19 @@ async fn runtime_empty_trash_deletes_series_level_dependents_before_removing_emp
         series_rows, 0,
         "empty-trash must hard-delete deleted series even when read progress and aggregation rows exist"
     );
+
+    let riir_db = RiirDatabase::file_backed(&ctx.paths().riir_db_file)
+        .await
+        .expect("RIIR db should reopen for empty-trash verification");
+    let remaining_contributions = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM SERIES_METADATA_CONTRIBUTION WHERE BOOK_ID = ?",
+    )
+    .bind("book-1")
+    .fetch_one(riir_db.read_pool())
+    .await
+    .expect("RIIR contribution count should be queryable");
+    riir_db.close().await;
+    assert_eq!(remaining_contributions, 0);
 }
 
 #[tokio::test]

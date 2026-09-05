@@ -69,6 +69,14 @@ impl RuntimeConfig {
             }
         }
     }
+
+    pub fn owns_riir_database(&self) -> bool {
+        self.writer_decision(WriterKind::MainDatabase)
+            .allows_write()
+            && self
+                .writer_decision(WriterKind::TasksDatabase)
+                .allows_write()
+    }
 }
 
 #[cfg(test)]
@@ -103,6 +111,7 @@ mod tests {
             ] {
                 assert_eq!(config.writer_decision(writer), WriterDecision::Allowed);
             }
+            assert!(config.owns_riir_database());
         }
     }
 
@@ -118,6 +127,7 @@ mod tests {
         ] {
             assert_eq!(config.writer_decision(writer), WriterDecision::Allowed);
         }
+        assert!(config.owns_riir_database());
     }
 
     #[test]
@@ -142,6 +152,7 @@ mod tests {
                 },
             );
         }
+        assert!(!config.owns_riir_database());
     }
 
     #[test]
@@ -170,5 +181,6 @@ mod tests {
                 reason: "search index ownership remains with external writer in isolated mode",
             },
         );
+        assert!(config.owns_riir_database());
     }
 }

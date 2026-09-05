@@ -88,6 +88,84 @@ async fn scanner_scan_output_is_persisted_into_kotlin_compatible_library_series_
 }
 
 #[tokio::test]
+async fn scanner_empty_trash_after_scan_cleans_deleted_book_contributions() {
+    let fixture = ScannerPersistenceFixture::new("scanner-persistence-empty-trash-riir")
+        .await
+        .expect("scanner RIIR empty-trash fixture should be created");
+
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for empty-trash-after-scan setup");
+    sqlx::query("UPDATE LIBRARY SET EMPTY_TRASH_AFTER_SCAN = 1 WHERE ID = ?")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("empty-trash-after-scan flag should be enabled");
+    pool.close().await;
+
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
+        .expect("initial scan should persist the book before it is removed");
+
+    let pool = connect_test_pool(fixture.paths.main_db.as_path(), 1)
+        .await
+        .expect("main db should open for scanned book lookup");
+    let book_id = sqlx::query_scalar::<_, String>(
+        "SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NULL LIMIT 1",
+    )
+    .bind("library-1")
+    .fetch_one(&pool)
+    .await
+    .expect("scanned book id should be queryable");
+    pool.close().await;
+
+    let riir_pool = connect_test_pool(fixture.paths.riir_db_file.as_path(), 1)
+        .await
+        .expect("RIIR db should open for empty-trash-after-scan setup");
+    sqlx::query("DELETE FROM SERIES_METADATA_CONTRIBUTION WHERE BOOK_ID = ?")
+        .bind(&book_id)
+        .execute(&riir_pool)
+        .await
+        .expect("existing RIIR contributions should be cleared for seed setup");
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA_CONTRIBUTION (BOOK_ID, PROVIDER, SOURCE_FILE_LAST_MODIFIED_SECONDS, SOURCE_FILE_SIZE, SOURCE_MEDIA_TYPE, SOURCE_MEDIA_MODIFIED_SECONDS, PAYLOAD_FORMAT_VERSION, OUTCOME) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&book_id)
+    .bind("COMICINFO")
+    .bind(1_i64)
+    .bind(2_i64)
+    .bind("application/zip")
+    .bind(3_i64)
+    .bind(1_i64)
+    .bind("ABSENT")
+    .execute(&riir_pool)
+    .await
+    .expect("RIIR contribution should be seeded for removed book");
+    riir_pool.close().await;
+
+    fs::remove_file(fixture.library_root.join("Series-A/Book-001.cbz"))
+        .expect("scanned book file should be removable");
+    process_scan_library_task(fixture.config.clone(), "library-1", 900, false)
+        .await
+        .expect("scan should permanently remove the missing book");
+
+    let riir_pool = connect_test_pool(fixture.paths.riir_db_file.as_path(), 1)
+        .await
+        .expect("RIIR db should open for empty-trash-after-scan verification");
+    let remaining = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM SERIES_METADATA_CONTRIBUTION WHERE BOOK_ID = ?",
+    )
+    .bind(&book_id)
+    .fetch_one(&riir_pool)
+    .await
+    .expect("RIIR contribution count should be queryable");
+    riir_pool.close().await;
+
+    assert_eq!(remaining, 0);
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn scanner_scan_persistence_emits_scan_and_analyze_tasks_into_persisted_runtime_flow() {
     let fixture = ScannerPersistenceFixture::new("scanner-persistence-task-emission")
         .await

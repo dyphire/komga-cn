@@ -3,6 +3,7 @@ use komga_application::library_catalog::{
     LibraryCatalogPort, LibraryCatalogQueryService, LibraryChangeSet, LibraryDetailAccess,
     LibraryRecord, LibraryTaskResult,
 };
+use komga_application::media_assets::SeriesMetadataContributionCleanupPort;
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_domain::discovery::{DiscoveryError, DiscoveryQueryContext};
 use sqlx::SqlitePool;
@@ -20,9 +21,15 @@ impl LibraryCatalogAccess {
         read_pool: SqlitePool,
         write_pool: SqlitePool,
         runtime_events: Arc<dyn RuntimeSseEventSink>,
+        contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
     ) -> Self {
         Self {
-            adapter: SqliteLibraryCatalogAdapter::new(read_pool, write_pool, runtime_events),
+            adapter: SqliteLibraryCatalogAdapter::new(
+                read_pool,
+                write_pool,
+                runtime_events,
+                contribution_cleanup,
+            ),
         }
     }
 }

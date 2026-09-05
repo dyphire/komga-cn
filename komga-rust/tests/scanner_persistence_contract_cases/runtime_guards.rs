@@ -1,7 +1,7 @@
 use super::support::*;
 use super::*;
 use komga_application::runtime_sse::RuntimeSseEventStore;
-use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
 use komga_infrastructure_base::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
@@ -32,6 +32,9 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
     let task_read_pool = connect_task_pool(&fixture.paths.main_db, default_read_max_connections())
         .await
         .expect("test private read pool should open");
+    let riir_db = RiirDatabase::file_backed(&fixture.paths.riir_db_file)
+        .await
+        .expect("test RIIR database should open");
     let runtime = TaskRuntimeContext::new(TaskRuntimeContextParams {
         main_db: DatabaseHandle::file_backed(fixture.paths.main_db.clone())
             .await
@@ -47,6 +50,7 @@ async fn scanner_runtime_blocks_scan_output_when_filesystem_scan_writer_is_exter
         task_write_pool,
         task_read_pool,
         runtime_events: Arc::new(RuntimeSseEventStore::default()),
+        riir_db: Some(riir_db),
     });
     let scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     scheduler
@@ -275,6 +279,7 @@ async fn scanner_startup_leaves_tasks_untouched_when_tasks_writer_is_external_ow
         task_write_pool,
         task_read_pool,
         runtime_events: Arc::new(RuntimeSseEventStore::default()),
+        riir_db: None,
     });
 
     let background =

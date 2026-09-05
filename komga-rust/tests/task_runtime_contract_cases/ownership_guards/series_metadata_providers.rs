@@ -1,4 +1,29 @@
 use super::*;
+use komga_application::runtime_sse::RuntimeSseEventStore;
+use komga_infrastructure_base::RiirDatabase;
+use komga_infrastructure_media_metadata::refresh_book_metadata;
+use std::collections::BTreeSet;
+
+async fn persist_book_series_contribution(ctx: &TestFixture, book_id: &str) {
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("main db should open for persisted series contribution setup");
+    let riir_db = RiirDatabase::file_backed(&ctx.paths().riir_db_file)
+        .await
+        .expect("RIIR db should open for persisted series contribution setup");
+    let capabilities = BTreeSet::from(["TITLE".to_string()]);
+    refresh_book_metadata(
+        &pool,
+        Some(&riir_db),
+        &RuntimeSseEventStore::default(),
+        book_id,
+        &capabilities,
+    )
+    .await
+    .expect("book metadata refresh should persist the series contribution");
+    riir_db.close().await;
+    pool.close().await;
+}
 
 #[tokio::test]
 async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch() {
@@ -54,6 +79,7 @@ async fn runtime_refresh_series_metadata_applies_epub_from_book_provider_patch()
         .await
         .expect("existing series genres should be cleared before EPUB provider refresh test");
     pool.close().await;
+    persist_book_series_contribution(&ctx, "book-1").await;
 
     let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
@@ -165,9 +191,10 @@ async fn runtime_refresh_series_metadata_ignores_non_iso_language_tags_from_book
     .bind("en-US")
     .bind("series-1")
     .execute(&pool)
-    .await
-    .expect("series metadata should be reset before invalid language refresh test");
+        .await
+        .expect("series metadata should be reset before invalid language refresh test");
     pool.close().await;
+    persist_book_series_contribution(&ctx, "book-1").await;
 
     let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
@@ -388,9 +415,10 @@ async fn runtime_refresh_series_metadata_applies_comicinfo_from_book_provider_an
         .bind("collection-1")
         .bind("series-1")
         .execute(&pool)
-        .await
-        .expect("existing collection memberships should be normalized before ComicInfo provider refresh test");
+    .await
+    .expect("existing collection memberships should be normalized before ComicInfo provider refresh test");
     pool.close().await;
+    persist_book_series_contribution(&ctx, "book-1").await;
 
     let runtime = runtime_task_context_with_ownership(
         ctx.paths(),
@@ -585,6 +613,8 @@ async fn runtime_refresh_series_metadata_ignores_deleted_books_from_book_provide
     .await
     .expect("series metadata should be reset before deleted-book provider refresh test");
     pool.close().await;
+    persist_book_series_contribution(&ctx, "book-1").await;
+    persist_book_series_contribution(&ctx, "book-deleted-series-provider").await;
 
     let runtime = runtime_task_context_with_ownership(
         ctx.paths(),

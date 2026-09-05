@@ -1,6 +1,7 @@
 use super::task_records::{
-    analyze_library_task_records, background_scan_library_task_record, empty_trash_task_records,
-    library_should_rescan, manual_scan_library_task_record, metadata_refresh_task_records,
+    analyze_library_task_records, background_scan_library_task_record,
+    book_metadata_refresh_task_records, empty_trash_task_records, library_should_rescan,
+    manual_scan_library_task_record, metadata_refresh_task_records,
 };
 use super::{
     LibraryBookSeriesRecord, LibraryCatalogMutationError, LibraryCatalogMutationPort,
@@ -187,6 +188,15 @@ where
         if library.convert_to_cbz && !previous_library.convert_to_cbz {
             task_records.extend(find_books_to_convert_task_records(&library.id));
         }
+        if series_metadata_provider_settings_changed(previous_library, library)
+            && let Some(ids) = self
+                .port
+                .library_series_and_book_ids(&library.id)
+                .await
+                .map_err(LibraryCatalogMutationError::persistence)?
+        {
+            task_records.extend(book_metadata_refresh_task_records(ids.books));
+        }
 
         Ok(task_records)
     }
@@ -206,6 +216,17 @@ where
 
         Ok(())
     }
+}
+
+fn series_metadata_provider_settings_changed(
+    previous: &LibraryRecord,
+    next: &LibraryRecord,
+) -> bool {
+    previous.import_comicinfo_series != next.import_comicinfo_series
+        || previous.import_comicinfo_collection != next.import_comicinfo_collection
+        || previous.import_comicinfo_series_append_volume
+            != next.import_comicinfo_series_append_volume
+        || previous.import_epub_series != next.import_epub_series
 }
 
 fn task_result(task_records: Vec<TaskQueueRecord>) -> LibraryTaskResult {

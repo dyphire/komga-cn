@@ -13,6 +13,7 @@ pub(crate) fn ensure_startup_runtime_layout(config: &RuntimeConfig) -> Result<()
             config_dir,
             &config.log_file,
             &config.database_file,
+            &config.riir_db_file,
             &config.tasks_db_file,
             &config.lucene_data_directory,
             &config.fonts_data_directory,
@@ -65,6 +66,9 @@ pub(crate) fn validate_single_writer_storage_ownership(
         let mut outside_isolation = Vec::new();
         if !config.database_file.starts_with(isolation_root) {
             outside_isolation.push(config.database_file.display().to_string());
+        }
+        if !config.riir_db_file.starts_with(isolation_root) {
+            outside_isolation.push(config.riir_db_file.display().to_string());
         }
         if !config.tasks_db_file.starts_with(isolation_root) {
             outside_isolation.push(config.tasks_db_file.display().to_string());

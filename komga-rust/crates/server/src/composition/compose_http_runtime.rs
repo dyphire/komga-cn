@@ -59,6 +59,7 @@ pub(super) fn compose_http_runtime(
         tasks_db,
         task_engine,
         runtime_events,
+        contribution_cleanup,
     } = runtime;
     let runtime_event_source: Arc<dyn RuntimeSseEventSource> = runtime_events.clone();
     let runtime_event_sink: Arc<dyn RuntimeSseEventSink> = runtime_events;
@@ -239,6 +240,7 @@ pub(super) fn compose_http_runtime(
             db.read_pool().clone(),
             db.write_pool().clone(),
             runtime_event_sink.clone(),
+            contribution_cleanup,
         )),
         task_queue: task_engine_arc.clone(),
         server_settings: server_settings.clone(),
@@ -411,6 +413,11 @@ fn compose_operational_state(
     remember_me_runtime_key: String,
     shutdown_trigger: Option<watch::Sender<bool>>,
 ) -> OperationalState {
+    let sse = shutdown_trigger
+        .as_ref()
+        .map(|shutdown_tx| SseConnectionState::accepting_with_shutdown(shutdown_tx.clone()))
+        .unwrap_or_default();
+
     OperationalState {
         runtime: RuntimeState {
             tasks_db_file: config.tasks_db_file.clone(),
@@ -438,7 +445,7 @@ fn compose_operational_state(
         oauth2_clients: oauth2_clients(config),
         oauth2_account_creation: config.oauth2_account_creation,
         oidc_email_verification: config.oidc_email_verification,
-        sse: SseConnectionState::accepting(),
+        sse,
         shutdown_trigger: shutdown_trigger.map(ShutdownTrigger::new),
     }
 }

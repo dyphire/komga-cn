@@ -1,7 +1,7 @@
 use super::*;
 use komga_application::runtime_sse::{RuntimeSseEventSink, RuntimeSseEventStore};
 use komga_application::task_processing::TaskProcessingError;
-use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
 use komga_infrastructure_base::{
     connect_task_pool, connect_task_write_pool, default_read_max_connections,
 };
@@ -115,6 +115,15 @@ pub(super) async fn runtime_task_context_from_config_with_events(
     let task_read_pool = connect_task_pool(&config.database_file, default_read_max_connections())
         .await
         .expect("test private read pool should open");
+    let riir_db = if config.owns_riir_database() {
+        Some(
+            RiirDatabase::file_backed(&config.riir_db_file)
+                .await
+                .expect("test RIIR database should open"),
+        )
+    } else {
+        None
+    };
     TaskRuntimeContext::new(TaskRuntimeContextParams {
         main_db: DatabaseHandle::file_backed(config.database_file.clone())
             .await
@@ -142,6 +151,7 @@ pub(super) async fn runtime_task_context_from_config_with_events(
         task_write_pool,
         task_read_pool,
         runtime_events,
+        riir_db,
     })
 }
 

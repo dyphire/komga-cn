@@ -1,11 +1,13 @@
 pub mod database;
 pub mod file_io;
+mod riir_database;
 mod shared;
 pub mod sqlite;
 pub mod stored_paths;
 pub mod unit_of_work;
 
 pub use database::DatabaseHandle;
+pub use riir_database::RiirDatabase;
 pub use shared::random_hex_token;
 pub use sqlite::{
     DEFAULT_MAX_CONNECTIONS, SharedSqlitePoolSnapshot, SqliteTempPool, WRITE_MAX_CONNECTIONS,

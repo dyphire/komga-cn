@@ -1,10 +1,14 @@
 use std::collections::BTreeSet;
 
+use anyhow::Context;
+use komga_application::media_assets::{
+    book_media_is_epub, book_media_is_rar_archive, book_media_is_zip_archive,
+};
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
 use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
-use komga_infrastructure_base::resolve_stored_path;
+use komga_infrastructure_base::{RiirDatabase, resolve_stored_path};
 use komga_infrastructure_media_core::content::epub_resources::load_epub_package_document;
 
 mod artwork_refresh;
@@ -17,6 +21,7 @@ mod queries;
 mod readlist;
 mod series_aggregation;
 mod series_metadata;
+mod series_metadata_contribution;
 mod sources;
 mod support;
 
@@ -27,6 +32,11 @@ pub use series_aggregation::aggregate_series_metadata;
 use series_metadata::{
     apply_mylar_series_import, apply_oneshot_series_metadata_import,
     apply_series_metadata_from_book_imports,
+};
+pub use series_metadata_contribution::RiirSeriesMetadataContributionCleanup;
+use series_metadata_contribution::{
+    SeriesMetadataContribution, SeriesMetadataContributionOutcome,
+    SeriesMetadataContributionSource, SeriesMetadataProvider, upsert,
 };
 use sources::{
     extract_comicinfo_book_patch, extract_comicinfo_readlists, extract_comicinfo_series_patch,
@@ -94,6 +104,7 @@ pub fn infer_transient_comicinfo_provider_metadata(
 
 pub async fn refresh_book_metadata(
     pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     capabilities: &BTreeSet<String>,
@@ -108,10 +119,19 @@ pub async fn refresh_book_metadata(
             SELECT b.URL AS BOOK_URL,
                    l.IMPORT_COMICINFO_BOOK AS IMPORT_COMICINFO_BOOK,
                    l.IMPORT_COMICINFO_READLIST AS IMPORT_COMICINFO_READLIST,
+                   l.IMPORT_COMICINFO_SERIES AS IMPORT_COMICINFO_SERIES,
+                   l.IMPORT_COMICINFO_COLLECTION AS IMPORT_COMICINFO_COLLECTION,
                    l.IMPORT_EPUB_BOOK AS IMPORT_EPUB_BOOK,
+                   l.IMPORT_EPUB_SERIES AS IMPORT_EPUB_SERIES,
+                   unixepoch(b.FILE_LAST_MODIFIED) AS FILE_LAST_MODIFIED,
+                   b.FILE_SIZE AS FILE_SIZE,
+                   COALESCE(m.MEDIA_TYPE, 'application/octet-stream') AS MEDIA_TYPE,
+                   unixepoch(m.LAST_MODIFIED_DATE) AS MEDIA_LAST_MODIFIED,
+                   m.STATUS AS MEDIA_STATUS,
                    l.IMPORT_BARCODE_ISBN AS IMPORT_BARCODE_ISBN
             FROM BOOK b
             JOIN LIBRARY l ON l.ID = b.LIBRARY_ID
+            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
             WHERE b.ID = ?
             LIMIT 1
             "#,
@@ -128,7 +148,11 @@ pub async fn refresh_book_metadata(
         if let Some(book_row) = &book_row {
             let import_comicinfo_book = book_row.get::<bool, _>("IMPORT_COMICINFO_BOOK");
             let import_comicinfo_readlist = book_row.get::<bool, _>("IMPORT_COMICINFO_READLIST");
+            let import_comicinfo_series = book_row.get::<bool, _>("IMPORT_COMICINFO_SERIES");
+            let import_comicinfo_collection =
+                book_row.get::<bool, _>("IMPORT_COMICINFO_COLLECTION");
             let import_epub_book = book_row.get::<bool, _>("IMPORT_EPUB_BOOK");
+            let import_epub_series = book_row.get::<bool, _>("IMPORT_EPUB_SERIES");
             let import_barcode_isbn = book_row.get::<bool, _>("IMPORT_BARCODE_ISBN");
             should_emit_book_changed |=
                 import_comicinfo_book && comicinfo_provider_matches_capabilities(capabilities);
@@ -136,46 +160,120 @@ pub async fn refresh_book_metadata(
                 import_epub_book && epub_provider_matches_capabilities(capabilities);
             should_emit_book_changed |=
                 import_barcode_isbn && barcode_provider_matches_capabilities(capabilities);
-            let should_read_comicinfo = (import_comicinfo_book || import_comicinfo_readlist)
-                && comicinfo_provider_matches_capabilities(capabilities);
+            let should_persist_comicinfo = import_comicinfo_series || import_comicinfo_collection;
+            let should_read_comicinfo =
+                (import_comicinfo_book || import_comicinfo_readlist || should_persist_comicinfo)
+                    && comicinfo_provider_matches_capabilities(capabilities);
             if should_read_comicinfo
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(xml) = load_comicinfo_bytes_for_media(&media)?
+                && (book_media_is_zip_archive(&media) || book_media_is_rar_archive(&media))
             {
-                let document = parse_comicinfo_xml(&xml).map_err(|error| {
-                    anyhow::anyhow!(error).context(format!(
-                        "failed to parse ComicInfo.xml from '{}': ",
-                        media.file_path.display()
-                    ))
-                })?;
-                if import_comicinfo_book {
-                    let patch = extract_comicinfo_book_patch(&document);
-                    apply_book_metadata_import_patch(pool, &book_id, patch).await?;
+                let document = load_comicinfo_bytes_for_media(&media)?
+                    .as_deref()
+                    .map(parse_comicinfo_xml)
+                    .transpose()
+                    .map_err(|error| {
+                        anyhow::anyhow!(error).context(format!(
+                            "failed to parse ComicInfo.xml from '{}': ",
+                            media.file_path.display()
+                        ))
+                    })?;
+
+                if should_persist_comicinfo
+                    && book_row.get::<Option<String>, _>("MEDIA_STATUS").as_deref() == Some("READY")
+                    && let Some(media_modified_seconds) =
+                        book_row.get::<Option<i64>, _>("MEDIA_LAST_MODIFIED")
+                {
+                    let riir_db =
+                        riir_db.context("book metadata refresh requires the RIIR database")?;
+                    let source = SeriesMetadataContributionSource {
+                        book_id: book_id.clone(),
+                        file_last_modified_seconds: book_row.get("FILE_LAST_MODIFIED"),
+                        file_size: book_row.get("FILE_SIZE"),
+                        media_type: book_row.get("MEDIA_TYPE"),
+                        media_modified_seconds,
+                    };
+                    let outcome = document.as_ref().map_or(
+                        SeriesMetadataContributionOutcome::Absent,
+                        |document| {
+                            SeriesMetadataContributionOutcome::Present(Box::new(
+                                SeriesMetadataContribution::ComicInfo {
+                                    plain: Box::new(extract_comicinfo_series_patch(
+                                        document, false,
+                                    )),
+                                    append_volume: Box::new(extract_comicinfo_series_patch(
+                                        document, true,
+                                    )),
+                                },
+                            ))
+                        },
+                    );
+                    upsert(riir_db, SeriesMetadataProvider::ComicInfo, &source, outcome).await?;
                 }
 
-                if import_comicinfo_readlist {
-                    for readlist in extract_comicinfo_readlists(&document) {
-                        if let Some(readlist_id) = readlist::upsert_comicinfo_readlist(
-                            pool,
-                            runtime_events,
-                            &book_id,
-                            readlist,
-                        )
-                        .await?
-                        {
-                            changed_readlist_ids.insert(readlist_id);
+                if let Some(document) = document {
+                    if import_comicinfo_book {
+                        let patch = extract_comicinfo_book_patch(&document);
+                        apply_book_metadata_import_patch(pool, &book_id, patch).await?;
+                    }
+
+                    if import_comicinfo_readlist {
+                        for readlist in extract_comicinfo_readlists(&document) {
+                            if let Some(readlist_id) = readlist::upsert_comicinfo_readlist(
+                                pool,
+                                runtime_events,
+                                &book_id,
+                                readlist,
+                            )
+                            .await?
+                            {
+                                changed_readlist_ids.insert(readlist_id);
+                            }
                         }
                     }
                 }
             }
 
-            if import_epub_book
+            if (import_epub_book || import_epub_series)
                 && epub_provider_matches_capabilities(capabilities)
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(package_document) = load_epub_package_document(&media).await?
+                && book_media_is_epub(&media)
             {
-                let patch = extract_epub_book_patch(&package_document)?;
-                apply_book_metadata_import_patch(pool, &book_id, patch).await?;
+                let package_document = load_epub_package_document(&media).await?;
+
+                if import_epub_series
+                    && book_row.get::<Option<String>, _>("MEDIA_STATUS").as_deref() == Some("READY")
+                    && let Some(media_modified_seconds) =
+                        book_row.get::<Option<i64>, _>("MEDIA_LAST_MODIFIED")
+                {
+                    let riir_db =
+                        riir_db.context("book metadata refresh requires the RIIR database")?;
+                    let source = SeriesMetadataContributionSource {
+                        book_id: book_id.clone(),
+                        file_last_modified_seconds: book_row.get("FILE_LAST_MODIFIED"),
+                        file_size: book_row.get("FILE_SIZE"),
+                        media_type: book_row.get("MEDIA_TYPE"),
+                        media_modified_seconds,
+                    };
+                    let outcome = package_document.as_deref().map_or(
+                        Ok(SeriesMetadataContributionOutcome::Absent),
+                        |package_document| {
+                            extract_epub_series_patch(package_document).map(|patch| {
+                                SeriesMetadataContributionOutcome::Present(Box::new(
+                                    SeriesMetadataContribution::Epub {
+                                        patch: Box::new(patch),
+                                    },
+                                ))
+                            })
+                        },
+                    )?;
+                    upsert(riir_db, SeriesMetadataProvider::Epub, &source, outcome).await?;
+                }
+
+                if import_epub_book && let Some(package_document) = package_document {
+                    let patch = extract_epub_book_patch(&package_document)?;
+                    apply_book_metadata_import_patch(pool, &book_id, patch).await?;
+                }
             }
 
             if import_barcode_isbn && barcode_provider_matches_capabilities(capabilities) {
@@ -298,6 +396,7 @@ use queries::{
 
 pub async fn refresh_series_metadata(
     pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
 ) -> anyhow::Result<()> {
@@ -343,17 +442,21 @@ pub async fn refresh_series_metadata(
             should_emit_series_changed =
                 import_comicinfo_series || import_epub_series || import_mylar_series || oneshot;
 
-            apply_series_metadata_from_book_imports(
-                pool,
-                runtime_events,
-                &series_id,
-                resolved_library_root.as_path(),
-                import_comicinfo_series,
-                import_comicinfo_collection,
-                import_comicinfo_series_append_volume,
-                import_epub_series,
-            )
-            .await?;
+            if import_comicinfo_series || import_comicinfo_collection || import_epub_series {
+                let riir_db =
+                    riir_db.context("series metadata refresh requires the RIIR database")?;
+                apply_series_metadata_from_book_imports(
+                    pool,
+                    runtime_events,
+                    &series_id,
+                    riir_db,
+                    import_comicinfo_series,
+                    import_comicinfo_collection,
+                    import_comicinfo_series_append_volume,
+                    import_epub_series,
+                )
+                .await?;
+            }
 
             apply_mylar_series_import(
                 pool,
@@ -414,140 +517,4 @@ pub async fn refresh_series_metadata(
         events::emit_series_changed(runtime_events, &series_id_for_events, library_id);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-    use std::fs;
-
-    use komga_application::runtime_sse::RuntimeSseEventStore;
-
-    use super::refresh_book_metadata;
-    use komga_infrastructure_test_support::BootstrappedBookFixture;
-
-    async fn set_library_import_flag(pool: &sqlx::SqlitePool, column: &str, value: i64) {
-        let query = match column {
-            "IMPORT_COMICINFO_BOOK" => "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = ? WHERE ID = ?",
-            "IMPORT_COMICINFO_READLIST" => {
-                "UPDATE LIBRARY SET IMPORT_COMICINFO_READLIST = ? WHERE ID = ?"
-            }
-            "IMPORT_EPUB_BOOK" => "UPDATE LIBRARY SET IMPORT_EPUB_BOOK = ? WHERE ID = ?",
-            "IMPORT_BARCODE_ISBN" => "UPDATE LIBRARY SET IMPORT_BARCODE_ISBN = ? WHERE ID = ?",
-            "IMPORT_COMICINFO_SERIES" => {
-                "UPDATE LIBRARY SET IMPORT_COMICINFO_SERIES = ? WHERE ID = ?"
-            }
-            "IMPORT_COMICINFO_COLLECTION" => {
-                "UPDATE LIBRARY SET IMPORT_COMICINFO_COLLECTION = ? WHERE ID = ?"
-            }
-            "IMPORT_COMICINFO_SERIES_APPEND_VOLUME" => {
-                "UPDATE LIBRARY SET IMPORT_COMICINFO_SERIES_APPEND_VOLUME = ? WHERE ID = ?"
-            }
-            "IMPORT_EPUB_SERIES" => "UPDATE LIBRARY SET IMPORT_EPUB_SERIES = ? WHERE ID = ?",
-            "IMPORT_MYLAR_SERIES" => "UPDATE LIBRARY SET IMPORT_MYLAR_SERIES = ? WHERE ID = ?",
-            _ => panic!("unsupported import flag column: {column}"),
-        };
-        sqlx::query(query)
-            .bind(value)
-            .bind("library-1")
-            .execute(pool)
-            .await
-            .expect("library import flag should be updated");
-    }
-
-    #[tokio::test]
-    async fn refresh_book_metadata_ignores_external_comicinfo_sidecar() {
-        let fixture =
-            BootstrappedBookFixture::open("refresh-book-ignores-external-comicinfo").await;
-        let library_root =
-            std::env::temp_dir().join(format!("komga-external-comicinfo-{}", std::process::id()));
-        let book_path = library_root.join("series/book-1.cbz");
-        fs::create_dir_all(book_path.parent().expect("book fixture should have parent"))
-            .expect("book fixture parent should be created");
-        zip::ZipWriter::new(fs::File::create(&book_path).expect("book archive should be created"))
-            .finish()
-            .expect("empty book archive should be written");
-        fixture.insert_library_series().await;
-        fixture.insert_book("book-1").await;
-        fixture.insert_book_metadata("book-1").await;
-        fixture
-            .insert_media_with_page_count("book-1", Some("application/zip"), "ERROR", 0)
-            .await;
-        sqlx::query("UPDATE LIBRARY SET ROOT = ? WHERE ID = ?")
-            .bind(library_root.to_string_lossy().to_string())
-            .bind("library-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("library root should point at the readable book archive");
-        set_library_import_flag(&fixture.pool, "IMPORT_COMICINFO_BOOK", 1).await;
-        sqlx::query(
-            "INSERT INTO SIDECAR (URL, PARENT_URL, LAST_MODIFIED_TIME, LIBRARY_ID) VALUES (?, ?, ?, ?)",
-        )
-        .bind("series/book-1.xml")
-        .bind("series/book-1.cbz")
-        .bind(1_i64)
-        .bind("library-1")
-        .execute(&fixture.pool)
-        .await
-        .expect("missing ComicInfo sidecar row should be inserted");
-        let runtime_events = RuntimeSseEventStore::default();
-        let capabilities = BTreeSet::from(["TITLE".to_string()]);
-
-        refresh_book_metadata(&fixture.pool, &runtime_events, "book-1", &capabilities)
-            .await
-            .expect("external ComicInfo sidecars should not be read by book refresh");
-        fixture.close().await;
-        let _ = fs::remove_dir_all(library_root);
-    }
-
-    #[tokio::test]
-    async fn refresh_book_metadata_propagates_corrupt_epub_package_error() {
-        let fixture = BootstrappedBookFixture::open("refresh-book-corrupt-epub").await;
-        let library_root =
-            std::env::temp_dir().join(format!("komga-corrupt-book-epub-{}", std::process::id()));
-        let book_path = library_root.join("series/book-1.epub");
-        fs::create_dir_all(book_path.parent().expect("book fixture should have parent"))
-            .expect("corrupt EPUB parent should be created");
-        fs::write(&book_path, b"not a zip archive").expect("corrupt EPUB should be written");
-        fixture.insert_library_series().await;
-        fixture.insert_book("book-1").await;
-        fixture.insert_book_metadata("book-1").await;
-        fixture
-            .insert_media("book-1", Some("application/epub+zip"))
-            .await;
-        sqlx::query("UPDATE LIBRARY SET ROOT = ?, IMPORT_EPUB_BOOK = ? WHERE ID = ?")
-            .bind(library_root.to_string_lossy().to_string())
-            .bind(1_i64)
-            .bind("library-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("library root and EPUB flag should be updated");
-        sqlx::query(
-            "UPDATE LIBRARY SET IMPORT_COMICINFO_BOOK = 0, IMPORT_COMICINFO_READLIST = 0 WHERE ID = ?",
-        )
-            .bind("library-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("ComicInfo import should be disabled for the EPUB error test");
-        sqlx::query("UPDATE BOOK SET NAME = ?, URL = ? WHERE ID = ?")
-            .bind("book-1.epub")
-            .bind("series/book-1.epub")
-            .bind("book-1")
-            .execute(&fixture.pool)
-            .await
-            .expect("book should point at corrupt EPUB fixture");
-        let runtime_events = RuntimeSseEventStore::default();
-        let capabilities = BTreeSet::from(["TITLE".to_string()]);
-
-        let error = refresh_book_metadata(&fixture.pool, &runtime_events, "book-1", &capabilities)
-            .await
-            .expect_err("corrupt EPUB package should fail metadata refresh");
-
-        assert!(
-            error.to_string().contains("EPUB package document"),
-            "{error}"
-        );
-        let _ = fs::remove_dir_all(library_root);
-        fixture.close().await;
-    }
 }

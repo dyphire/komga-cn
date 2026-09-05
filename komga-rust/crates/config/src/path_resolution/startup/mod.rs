@@ -14,6 +14,6 @@ pub(crate) use oauth2::resolve_oauth2_clients_for_startup_slice;
 pub(crate) use paths::{
     default_home_config_dir, default_log_file_for_config_dir, expand_path_placeholders,
     is_default_home_config_dir, path_to_string, preferred_string, read_string,
-    resolve_derived_runtime_paths,
+    resolve_derived_runtime_paths, riir_db_file_for,
 };
 pub(crate) use writer_ownership::resolve_writer_ownership_policy_for_startup_slice;

@@ -10,6 +10,10 @@ pub enum ConfigError {
     InvalidBoolean(String),
     InvalidContextPath(String),
     InvalidConfigSource(String),
+    RiirStoragePathCollision {
+        path: PathBuf,
+        conflicting_setting: &'static str,
+    },
     DirectoryCreate {
         path: PathBuf,
         source: std::io::Error,
@@ -42,6 +46,14 @@ impl std::fmt::Display for ConfigError {
             Self::InvalidConfigSource(value) => {
                 write!(f, "invalid runtime startup config source: {value}")
             }
+            Self::RiirStoragePathCollision {
+                path,
+                conflicting_setting,
+            } => write!(
+                f,
+                "RIIR database path '{}' conflicts with {conflicting_setting}: configure a distinct storage path",
+                path.display(),
+            ),
             Self::DirectoryCreate { path, source } => {
                 write!(
                     f,

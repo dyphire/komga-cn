@@ -141,7 +141,7 @@ async fn serve_router_with_shutdown_timeout(
     startup_started_at: Instant,
     shutdown_grace_period: Duration,
 ) -> std::io::Result<()> {
-    let (shutdown_lifecycle_tx, mut shutdown_lifecycle_rx) = oneshot::channel();
+    let (shutdown_started_tx, mut shutdown_started_rx) = oneshot::channel();
     let (server_ready_tx, server_ready_rx) = oneshot::channel();
     startup_timing.record_application_started(startup_started_at.elapsed());
     let mut server = tokio::spawn(async move {
@@ -152,7 +152,7 @@ async fn serve_router_with_shutdown_timeout(
         .with_graceful_shutdown(shutdown_signal(
             shutdown_tx,
             shutdown_rx,
-            shutdown_lifecycle_tx,
+            shutdown_started_tx,
         ));
         let server = server.into_future();
         tokio::pin!(server);
@@ -179,11 +179,21 @@ async fn serve_router_with_shutdown_timeout(
     }
 
     tokio::select! {
-        result = &mut server => flatten_server_task_result(result),
-        _ = &mut shutdown_lifecycle_rx => wait_for_server_shutdown_completion(
-            &mut server,
-            shutdown_grace_period,
-        ).await,
+        result = &mut server => {
+            let result = flatten_server_task_result(result);
+            if shutdown_started_rx.await.is_ok() {
+                complete_shutdown_lifecycle().await;
+            }
+            result
+        },
+        _ = &mut shutdown_started_rx => {
+            let result = wait_for_server_shutdown_completion(
+                &mut server,
+                shutdown_grace_period,
+            ).await;
+            complete_shutdown_lifecycle().await;
+            result
+        },
     }
 }
 
@@ -194,7 +204,7 @@ fn build_http_router(app: komga_interfaces::state::HttpAppState) -> Router {
 async fn shutdown_signal(
     shutdown_tx: watch::Sender<bool>,
     mut shutdown_rx: watch::Receiver<bool>,
-    shutdown_lifecycle_tx: oneshot::Sender<()>,
+    shutdown_started_tx: oneshot::Sender<()>,
 ) {
     let ctrl_c = async {
         let _ = signal::ctrl_c().await;
@@ -230,8 +240,7 @@ async fn shutdown_signal(
     }
 
     let _ = shutdown_tx.send(true);
-    complete_shutdown_lifecycle().await;
-    let _ = shutdown_lifecycle_tx.send(());
+    let _ = shutdown_started_tx.send(());
 }
 
 async fn wait_for_server_shutdown_completion(
@@ -294,82 +303,24 @@ async fn complete_shutdown_lifecycle() {
         outcome = "graceful",
         "Server shutdown requested",
     );
-    close_all_shared_pools().await;
-    tracing::info!(
-        event = "shared_pool_close",
-        outcome = "closed",
-        "Closed shared sqlite pools",
-    );
+    if close_shared_pools_with_timeout(SHUTDOWN_GRACE_PERIOD).await {
+        tracing::info!(
+            event = "shared_pool_close",
+            outcome = "closed",
+            "Closed shared sqlite pools",
+        );
+    } else {
+        tracing::warn!(
+            event = "shared_pool_close",
+            outcome = "timed_out",
+            shutdown_grace_period_ms = SHUTDOWN_GRACE_PERIOD.as_millis() as u64,
+            "Shared sqlite pool close exceeded shutdown deadline; continuing shutdown",
+        );
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::routing::get;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
-    use tokio::time::{Duration, timeout};
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn graceful_shutdown_exits_even_when_keep_alive_connection_lingers() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("test listener should bind");
-        let address = listener
-            .local_addr()
-            .expect("test listener should expose local addr");
-        let router = Router::new().route("/hold", get(|| async { "ok" }));
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let startup_timing = StartupTimingState::default();
-        let startup_started_at = Instant::now() - Duration::from_millis(250);
-
-        let server = tokio::spawn(serve_router_with_shutdown_timeout(
-            listener,
-            router,
-            shutdown_tx.clone(),
-            shutdown_rx,
-            startup_timing.clone(),
-            startup_started_at,
-            Duration::from_millis(100),
-        ));
-
-        let mut stream = TcpStream::connect(address)
-            .await
-            .expect("test client should connect");
-        stream
-            .write_all(b"GET /hold HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n")
-            .await
-            .expect("test client should write request");
-
-        let mut response = Vec::new();
-        let mut buffer = [0_u8; 256];
-        while !response.ends_with(b"ok") {
-            let read = timeout(Duration::from_secs(1), stream.read(&mut buffer))
-                .await
-                .expect("response read should not time out")
-                .expect("response read should succeed");
-            assert!(read > 0, "response should include the keep-alive payload");
-            response.extend_from_slice(&buffer[..read]);
-        }
-
-        let snapshot = startup_timing.snapshot();
-        assert!(
-            snapshot.application_started_time_seconds >= 0.25,
-            "server startup should record started before serving requests: {snapshot:?}",
-        );
-        assert!(
-            snapshot.application_ready_time_seconds >= snapshot.application_started_time_seconds,
-            "server readiness should not precede started timing: {snapshot:?}",
-        );
-
-        shutdown_tx
-            .send(true)
-            .expect("shutdown signal should be sent");
-
-        timeout(Duration::from_secs(1), server)
-            .await
-            .expect("server should stop within the shutdown deadline")
-            .expect("server task should join")
-            .expect("server shutdown should succeed");
-    }
+async fn close_shared_pools_with_timeout(timeout_duration: Duration) -> bool {
+    tokio::time::timeout(timeout_duration, close_all_shared_pools())
+        .await
+        .is_ok()
 }

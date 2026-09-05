@@ -158,6 +158,7 @@ fn runtime_startup_prepare_task_queue_logs_truthful_skip_boundaries_for_external
                 task_write_pool,
                 task_read_pool,
                 runtime_events: Arc::new(RuntimeSseEventStore::default()),
+                riir_db: None,
             })
         });
 
@@ -232,6 +233,7 @@ fn runtime_startup_prepare_task_queue_skips_search_rebuild_when_search_index_not
                 task_write_pool,
                 task_read_pool,
                 runtime_events: Arc::new(RuntimeSseEventStore::default()),
+                riir_db: None,
             })
         });
 
@@ -492,6 +494,7 @@ fn runtime_startup_library_scan_processing_logs_run_complete_and_skip_boundaries
                 task_write_pool,
                 task_read_pool,
                 runtime_events: Arc::new(RuntimeSseEventStore::default()),
+                riir_db: None,
             })
         });
     let mut skip_config = runtime_config_for_logging_contract(

@@ -9,14 +9,15 @@ use komga_application::task_processing::{
 };
 use sqlx::SqlitePool;
 
-use komga_infrastructure_base::DatabaseHandle;
 use komga_infrastructure_base::sqlite::{
     connect_main_write_context, connect_task_pool, connect_task_write_pool, connect_write_pool,
     default_read_max_connections, evict_shared_pools_for_paths, schema,
 };
+use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
 
 pub(crate) struct RuntimeTestFixture {
     pub(crate) database_file: PathBuf,
+    pub(crate) riir_db_file: PathBuf,
     pub(crate) tasks_db_file: PathBuf,
     pub(crate) lucene_dir: PathBuf,
     pub(crate) library_root: PathBuf,
@@ -26,6 +27,7 @@ impl RuntimeTestFixture {
     pub(crate) fn new(case: &str) -> Self {
         Self {
             database_file: unique_temp_path(&format!("komga-{case}-main")),
+            riir_db_file: unique_temp_path(&format!("komga-{case}-riir")),
             tasks_db_file: unique_temp_path(&format!("komga-{case}-tasks")),
             lucene_dir: unique_temp_path(&format!("komga-{case}-lucene")),
             library_root: unique_temp_path(&format!("komga-{case}-root")),
@@ -64,6 +66,9 @@ impl RuntimeTestFixture {
         let task_read_pool = connect_task_pool(&self.database_file, default_read_max_connections())
             .await
             .expect("runtime test private read pool should open");
+        let riir_db = RiirDatabase::file_backed(&self.riir_db_file)
+            .await
+            .expect("runtime test RIIR database should open");
         TaskRuntimeContext::new(TaskRuntimeContextParams {
             main_db,
             tasks_db_file: self.tasks_db_file.clone(),
@@ -77,11 +82,16 @@ impl RuntimeTestFixture {
             task_write_pool,
             task_read_pool,
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: Some(riir_db),
         })
     }
 
     pub(crate) async fn cleanup(self) {
-        let db_paths = [self.database_file.clone(), self.tasks_db_file.clone()];
+        let db_paths = [
+            self.database_file.clone(),
+            self.riir_db_file.clone(),
+            self.tasks_db_file.clone(),
+        ];
         for pool in evict_shared_pools_for_paths(&db_paths) {
             pool.close().await;
         }

@@ -215,6 +215,25 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
     .get::<String, _>("LAST_MODIFIED");
     pool.close().await;
 
+    let riir_pool = connect_test_pool(ctx.paths().riir_db_file.as_path(), 1)
+        .await
+        .expect("RIIR db should open for soft-delete fixture setup");
+    sqlx::query(
+        "INSERT INTO SERIES_METADATA_CONTRIBUTION (BOOK_ID, PROVIDER, SOURCE_FILE_LAST_MODIFIED_SECONDS, SOURCE_FILE_SIZE, SOURCE_MEDIA_TYPE, SOURCE_MEDIA_MODIFIED_SECONDS, PAYLOAD_FORMAT_VERSION, OUTCOME) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind("book-1")
+    .bind("EPUB")
+    .bind(1_i64)
+    .bind(2_i64)
+    .bind("application/epub+zip")
+    .bind(3_i64)
+    .bind(1_i64)
+    .bind("ABSENT")
+    .execute(&riir_pool)
+    .await
+    .expect("RIIR contribution should be seeded for soft-deleted book");
+    riir_pool.close().await;
+
     let runtime = runtime_task_context(ctx.paths()).await;
     let mut scheduler = TaskQueueScheduler::for_runtime(runtime.clone(), "rust-main").await;
     enqueue_delete_book(&mut scheduler, "book-1").await;
@@ -287,6 +306,22 @@ async fn runtime_delete_book_soft_deletes_rows_and_removes_book_sidecar_files() 
         series_row.get::<String, _>("LAST_MODIFIED"),
         series_old_last_modified,
         "delete-book runtime should refresh series last-modified so series changes remain externally visible",
+    );
+
+    let riir_pool = connect_test_pool(ctx.paths().riir_db_file.as_path(), 1)
+        .await
+        .expect("RIIR db should open for soft-delete verification");
+    let contribution_rows = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM SERIES_METADATA_CONTRIBUTION WHERE BOOK_ID = ?",
+    )
+    .bind("book-1")
+    .fetch_one(&riir_pool)
+    .await
+    .expect("soft-deleted book contribution count should be queryable");
+    riir_pool.close().await;
+    assert_eq!(
+        contribution_rows, 1,
+        "soft-deleting a book must retain its RIIR contributions until permanent deletion",
     );
 }
 

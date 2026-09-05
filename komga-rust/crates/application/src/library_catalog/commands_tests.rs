@@ -71,6 +71,35 @@ fn update_command_enqueues_repair_extension_tasks_for_mismatched_books() {
 }
 
 #[test]
+fn update_command_refreshes_book_metadata_when_series_provider_settings_change() {
+    let service = LibraryCatalogCommandService::new(TestPort {
+        library: Some(LibraryRecord::default_record("library-1".to_string())),
+        library_series_and_book_ids: Some(LibrarySeriesAndBookIds {
+            series_ids: vec!["series-1".to_string()],
+            books: vec![LibraryBookSeriesRecord {
+                book_id: "book-1".to_string(),
+                series_id: "series-1".to_string(),
+            }],
+        }),
+        ..TestPort::default()
+    });
+
+    let result = block_on(service.update_library(
+        "library-1",
+        LibraryChangeSet {
+            import_epub_series: Some(false),
+            ..LibraryChangeSet::default()
+        },
+    ))
+    .expect("changing EPUB series import should succeed");
+
+    assert_eq!(result.task_records.len(), 1);
+    assert_eq!(result.task_records[0].id, "RefreshBookMetadata_book-1");
+    assert_eq!(result.task_records[0].simple_type, "RefreshBookMetadata");
+    assert_eq!(result.task_records[0].group.as_deref(), Some("series-1"));
+}
+
+#[test]
 fn analyze_command_returns_empty_task_list_when_library_is_missing() {
     let service = LibraryCatalogCommandService::new(TestPort::default());
 
