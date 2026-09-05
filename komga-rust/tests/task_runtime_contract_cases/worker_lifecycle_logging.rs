@@ -10,64 +10,6 @@ use tokio::sync::Mutex;
 use tracing::Instrument;
 
 #[test]
-fn runtime_worker_spawns_log_started_and_shutdown_with_span_context() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("worker spawn lifecycle test runtime should build");
-    let ctx = runtime.block_on(
-        TestFixture::builder("worker-spawn-lifecycle")
-            .without_runtime_workers()
-            .build(),
-    );
-    let config = ctx.config().clone();
-
-    let logs = capture_router_logs_async_result(&config, {
-        let config = config.clone();
-        async move {
-            async move {
-                let runtime = runtime_task_context_from_config(&config).await;
-                let background =
-                    komga_infrastructure_jobs::prepare_task_queue(runtime.clone(), None).await;
-                background.spawn_workers(runtime, None);
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
-            .instrument(tracing::info_span!("worker_lifecycle_contract_parent"))
-            .await;
-        }
-    })
-    .0;
-
-    let events = parse_json_log_lines(&logs);
-    let periodic_start = worker_event(&events, "periodic_library_scan", "started");
-    let background_start = worker_event(&events, "background_task", "started");
-    let auth_start = worker_event(&events, "authentication_activity_cleanup", "started");
-    let periodic_shutdown = worker_event(&events, "periodic_library_scan", "shutdown");
-    let background_shutdown = worker_event(&events, "background_task", "shutdown");
-    let auth_shutdown = worker_event(&events, "authentication_activity_cleanup", "shutdown");
-
-    println!("runtime_worker_spawn_lifecycle_logs {logs}");
-
-    assert_eq!(field_bool(periodic_start, "in_span"), Some(true));
-    assert_eq!(field_bool(background_start, "in_span"), Some(true));
-    assert_eq!(field_bool(auth_start, "in_span"), Some(true));
-    assert_eq!(field_bool(periodic_start, "consumes_queue"), Some(true));
-    assert_eq!(field_bool(auth_start, "owns_main_database"), Some(true));
-    assert_eq!(
-        field_str(periodic_shutdown, "worker_id"),
-        Some("periodic_library_scan")
-    );
-    assert_eq!(
-        field_str(background_shutdown, "worker_id"),
-        Some("background_task")
-    );
-    assert_eq!(
-        field_str(auth_shutdown, "worker_id"),
-        Some("authentication_activity_cleanup")
-    );
-}
-
-#[test]
 fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -88,12 +30,17 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
                 let background =
                     komga_infrastructure_jobs::prepare_task_queue(runtime.clone(), None).await;
                 let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-                background.spawn_workers(runtime, Some(shutdown_rx));
+                let workers = background.spawn_workers(runtime, Some(shutdown_rx));
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 shutdown_tx
                     .send(true)
                     .expect("worker shutdown signal should send");
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                for worker in workers {
+                    worker
+                        .await
+                        .expect("worker should exit after shutdown signal");
+                }
+                background.shutdown_executor().await;
                 tracing::info!(
                     event = "worker_shutdown_signal_marker",
                     "worker shutdown marker"
@@ -108,36 +55,18 @@ fn runtime_workers_observe_shutdown_signal_before_runtime_teardown() {
     .0;
 
     let events = parse_json_log_lines(&logs);
-    let periodic_shutdown_index = event_index(
-        &events,
-        "worker_shutdown",
-        "periodic_library_scan",
-        "shutdown",
-    );
-    let background_shutdown_index =
-        event_index(&events, "worker_shutdown", "background_task", "shutdown");
-    let auth_shutdown_index = event_index(
-        &events,
-        "worker_shutdown",
-        "authentication_activity_cleanup",
-        "shutdown",
-    );
     let marker_index = event_index(&events, "worker_shutdown_signal_marker", "", "");
-
-    println!("runtime_worker_shutdown_signal_logs {logs}");
-
-    assert!(
-        periodic_shutdown_index < marker_index,
-        "periodic worker should stop before marker: {events:?}"
-    );
-    assert!(
-        background_shutdown_index < marker_index,
-        "background worker should stop before marker: {events:?}"
-    );
-    assert!(
-        auth_shutdown_index < marker_index,
-        "auth cleanup worker should stop before marker: {events:?}"
-    );
+    for worker in [
+        "periodic_library_scan",
+        "background_task",
+        "authentication_activity_cleanup",
+    ] {
+        let started = worker_event(&events, worker, "started");
+        assert_eq!(field_bool(started, "in_span"), Some(true));
+        assert_eq!(field_bool(started, "consumes_queue"), Some(true));
+        assert_eq!(field_bool(started, "owns_main_database"), Some(true));
+        assert!(event_index(&events, "worker_shutdown", worker, "shutdown") < marker_index);
+    }
 }
 
 #[tokio::test]

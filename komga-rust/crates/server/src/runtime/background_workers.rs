@@ -37,6 +37,7 @@ pub(crate) struct HttpRuntimeParts {
     pub(crate) contribution_cleanup: Option<Arc<dyn SeriesMetadataContributionCleanupPort>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct RouterRuntimeLifecycle {
     worker_runtime_guard: Option<WorkerRuntimeGuard>,
 }
@@ -44,6 +45,7 @@ pub(crate) struct RouterRuntimeLifecycle {
 #[derive(Debug)]
 struct WorkerRuntimeLifecycleGuard {
     shutdown_tx: watch::Sender<bool>,
+    completion: tokio::sync::Mutex<Option<tokio::task::JoinHandle<TaskRuntimeContext>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -84,15 +86,15 @@ pub(crate) async fn start_task_runtime_with_events(
     let background = prepare_task_queue(runtime.clone(), startup_search_plan.startup_task).await;
     let tasks_db =
         open_database_handle(runtime.worker().tasks_db_file().to_path_buf(), "tasks").await?;
+    let task_engine = background.task_engine();
     let worker_runtime_guard = match mode {
         TaskRuntimeMode::WorkersEnabled { shutdown_rx } => Some(spawn_runtime_workers(
-            &background,
+            background,
             runtime.clone(),
             shutdown_rx,
         )),
         TaskRuntimeMode::WorkersDisabled => None,
     };
-    let task_engine = background.task_engine();
     let contribution_cleanup = runtime.job().contribution_cleanup();
 
     Ok(TaskRouterParts {
@@ -110,6 +112,38 @@ pub(crate) async fn start_task_runtime_with_events(
 }
 
 impl RouterRuntimeLifecycle {
+    pub(crate) async fn shutdown(&self) {
+        let Some(guard) = &self.worker_runtime_guard else {
+            return;
+        };
+        let _ = guard.shutdown_tx.send(true);
+        let mut completion = guard.completion.lock().await;
+        if let Some(handle) = completion.as_mut() {
+            match handle.await {
+                Ok(runtime) => {
+                    let job = runtime.job();
+                    let database = job.database();
+                    tracing::info!(
+                        event = "private_pool_close",
+                        outcome = "started",
+                        "Closing task runtime sqlite pools"
+                    );
+                    tokio::join!(
+                        database.task_read_pool().close(),
+                        database.task_write_pool().close()
+                    );
+                    tracing::info!(
+                        event = "private_pool_close",
+                        outcome = "closed",
+                        "Task runtime sqlite pools closed"
+                    );
+                }
+                Err(error) => tracing::error!(%error, "runtime shutdown coordinator failed"),
+            }
+            *completion = None;
+        }
+    }
+
     pub(crate) fn attach(self, router: Router) -> Router {
         match self.worker_runtime_guard {
             Some(worker_runtime_guard) => router.layer(Extension(worker_runtime_guard)),
@@ -133,23 +167,44 @@ async fn open_database_handle(
 }
 
 fn spawn_runtime_workers(
-    background: &RuntimeBackgroundState,
+    background: RuntimeBackgroundState,
     runtime: TaskRuntimeContext,
     shutdown_rx: Option<watch::Receiver<bool>>,
 ) -> WorkerRuntimeGuard {
     let (internal_shutdown_tx, internal_shutdown_rx) = watch::channel(false);
-    if let Some(mut external_shutdown_rx) = shutdown_rx {
-        let forward_shutdown_tx = internal_shutdown_tx.clone();
-        tokio::spawn(async move {
-            wait_for_shutdown_signal(&mut external_shutdown_rx).await;
-            let _ = forward_shutdown_tx.send(true);
-        });
-    }
-
-    background.spawn_workers(runtime, Some(internal_shutdown_rx));
+    let workers = background.spawn_workers(runtime.clone(), Some(internal_shutdown_rx.clone()));
+    let forward_shutdown_tx = internal_shutdown_tx.clone();
+    let completion = tokio::spawn(async move {
+        let mut internal_shutdown_rx = internal_shutdown_rx;
+        let external_shutdown = async {
+            match shutdown_rx {
+                Some(mut rx) => wait_for_shutdown_signal(&mut rx).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            _ = external_shutdown => {},
+            _ = wait_for_shutdown_signal(&mut internal_shutdown_rx) => {},
+        }
+        background.stop_claiming();
+        let _ = forward_shutdown_tx.send(true);
+        for worker in workers {
+            if let Err(error) = worker.await {
+                tracing::error!(%error, "runtime worker failed to join");
+            }
+        }
+        background.shutdown_executor().await;
+        tracing::info!(
+            event = "runtime_shutdown",
+            outcome = "closed",
+            "Runtime workers and executor closed"
+        );
+        runtime
+    });
 
     Arc::new(WorkerRuntimeLifecycleGuard {
         shutdown_tx: internal_shutdown_tx,
+        completion: tokio::sync::Mutex::new(Some(completion)),
     })
 }
 

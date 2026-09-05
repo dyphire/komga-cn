@@ -25,11 +25,27 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
     runtime.block_on(async {
         komga_server::app::validate_startup_schema_gate_for_contract(&config)
             .await
-            .expect("startup lifecycle schema should initialize")
+            .expect("startup lifecycle schema should initialize");
+        let pool = connect_test_pool(&config.database_file, 1).await.unwrap();
+        komga_infrastructure_identity::persist_initial_bootstrap_users(
+            &pool,
+            &[
+                komga_infrastructure_identity::InitialBootstrapUserWriteModel {
+                    id: "shutdown-admin".into(),
+                    email: "shutdown@example.org".into(),
+                    hashed_password: bcrypt::hash("shutdown-test-password", 4).unwrap(),
+                    roles: vec!["ADMIN".into()],
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        pool.close().await;
     });
     config.bind_address = listener
         .local_addr()
         .expect("startup lifecycle test listener should expose local addr");
+    let listener = listener.into_std().unwrap();
     let expected_database_file = config.database_file.to_string_lossy().to_string();
     let expected_bind_address = config.bind_address.to_string();
     let startup_timing = StartupTimingState::default();
@@ -38,7 +54,9 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
         let config = config.clone();
         let startup_timing = startup_timing.clone();
         async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
             let startup_wait = startup_timing.clone();
+            let shutdown_url = format!("http://{}/actuator/shutdown", config.bind_address);
             let join = tokio::spawn(async move {
                 komga_server::app::serve_with_startup_timing_for_contract(
                     listener,
@@ -49,8 +67,26 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
             });
 
             wait_for_application_started(&startup_wait).await;
-            join.abort();
-            let _ = join.await;
+            let response = reqwest::Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .unwrap()
+                .post(shutdown_url)
+                .basic_auth("shutdown@example.org", Some("shutdown-test-password"))
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                response.status().is_success(),
+                "shutdown returned {}",
+                response.status()
+            );
+            drop(response);
+            tokio::time::timeout(Duration::from_secs(2), join)
+                .await
+                .expect("idle server should shut down without consuming the five-second deadline")
+                .unwrap()
+                .unwrap();
         }
     });
 
@@ -59,6 +95,23 @@ fn runtime_startup_real_server_path_emits_banner_runtime_search_and_bind_events(
     let runtime = event_fields(&events, "startup_runtime");
     let search = event_fields(&events, "search_startup_decision");
     let bind = event_fields(&events, "server_bind");
+    assert_eq!(
+        field_str(event_fields(&events, "server_shutdown"), "outcome"),
+        Some("graceful")
+    );
+    assert_eq!(
+        field_str(event_fields(&events, "runtime_shutdown"), "outcome"),
+        Some("closed")
+    );
+    assert_eq!(
+        field_str(event_fields(&events, "private_pool_close"), "outcome"),
+        Some("started")
+    );
+    assert_eq!(
+        field_str(event_fields(&events, "shared_pool_close"), "outcome"),
+        Some("closed")
+    );
+    assert_eq!(event_count(&events, "server_shutdown_timeout"), 0);
 
     println!("runtime_startup_lifecycle_logs {logs}");
 
@@ -262,22 +315,4 @@ fn runtime_search_startup_failure_logs_actionable_context_before_returning_error
         "search startup failure should emit actionable error details: {search:?}",
     );
     assert_eq!(event_count(&events, "server_bind"), 0);
-}
-
-#[test]
-fn runtime_shutdown_lifecycle_logs_shutdown_and_shared_pool_close_events() {
-    let _guard = startup_contract_lock();
-    let config = runtime_config_for_logging_contract("komga-runtime-shutdown-lifecycle");
-    let logs = capture_contract_log_async(&config, async move {
-        komga_server::app::shutdown_runtime_for_contract().await;
-    });
-
-    let events = parse_json_log_lines(&logs);
-    let shutdown = event_fields(&events, "server_shutdown");
-    let pools = event_fields(&events, "shared_pool_close");
-
-    println!("runtime_shutdown_lifecycle_logs {logs}");
-
-    assert_eq!(field_str(shutdown, "outcome"), Some("graceful"));
-    assert_eq!(field_str(pools, "outcome"), Some("closed"));
 }

@@ -109,15 +109,20 @@ pub(crate) async fn serve(
     crate::bootstrap::emit_startup_banner_and_runtime_event(&config).await;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let router = build_router(
+    let parts = start_task_runtime(
         &config,
         TaskRuntimeMode::WorkersEnabled {
             shutdown_rx: Some(shutdown_rx.clone()),
         },
-        Some(shutdown_tx.clone()),
-        startup_timing.clone(),
     )
     .await?;
+    let lifecycle = parts.lifecycle.clone();
+    let router = build_router_from_parts(
+        &config,
+        parts,
+        Some(shutdown_tx.clone()),
+        startup_timing.clone(),
+    )?;
     emit_server_bind_event(&listener);
 
     serve_router_with_shutdown_timeout(
@@ -127,7 +132,7 @@ pub(crate) async fn serve(
         shutdown_rx,
         startup_timing,
         startup_started_at,
-        SHUTDOWN_GRACE_PERIOD,
+        lifecycle,
     )
     .await
 }
@@ -139,12 +144,14 @@ async fn serve_router_with_shutdown_timeout(
     shutdown_rx: watch::Receiver<bool>,
     startup_timing: StartupTimingState,
     startup_started_at: Instant,
-    shutdown_grace_period: Duration,
+    lifecycle: crate::runtime::RouterRuntimeLifecycle,
 ) -> std::io::Result<()> {
-    let (shutdown_started_tx, mut shutdown_started_rx) = oneshot::channel();
-    let (server_ready_tx, server_ready_rx) = oneshot::channel();
+    let fallback_deadline = || Instant::now() + SHUTDOWN_GRACE_PERIOD;
+    let (shutdown_started_tx, mut shutdown_started_rx) = oneshot::channel::<Instant>();
+    let (server_ready_tx, mut server_ready_rx) = oneshot::channel();
     startup_timing.record_application_started(startup_started_at.elapsed());
-    let mut server = tokio::spawn(async move {
+    let mut server = tokio::task::JoinSet::new();
+    server.spawn(async move {
         let server = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<SocketAddr>(),
@@ -171,29 +178,47 @@ async fn serve_router_with_shutdown_timeout(
         .await
     });
 
-    tokio::select! {
-        _ = server_ready_rx => {
-            startup_timing.record_application_ready(startup_started_at.elapsed());
-        },
-        result = &mut server => return flatten_server_task_result(result),
-    }
-
-    tokio::select! {
-        result = &mut server => {
-            let result = flatten_server_task_result(result);
-            if shutdown_started_rx.await.is_ok() {
-                complete_shutdown_lifecycle().await;
-            }
-            result
-        },
-        _ = &mut shutdown_started_rx => {
-            let result = wait_for_server_shutdown_completion(
-                &mut server,
-                shutdown_grace_period,
-            ).await;
-            complete_shutdown_lifecycle().await;
-            result
-        },
+    let mut ready = false;
+    let (deadline, server_result) = loop {
+        tokio::select! {
+            _ = &mut server_ready_rx, if !ready => {
+                ready = true;
+                startup_timing.record_application_ready(startup_started_at.elapsed());
+            },
+            result = server.join_next() => {
+                let deadline = shutdown_started_rx.try_recv().unwrap_or_else(|_| fallback_deadline());
+                break (deadline, Some(flatten_server_task_result(result)));
+            },
+            deadline = &mut shutdown_started_rx => {
+                break (deadline.unwrap_or_else(|_| fallback_deadline()), None);
+            },
+        }
+    };
+    let shutdown = async {
+        let result = match server_result {
+            Some(result) => result,
+            None => flatten_server_task_result(server.join_next().await),
+        };
+        lifecycle.shutdown().await;
+        complete_shutdown_lifecycle().await;
+        result
+    };
+    match tokio::time::timeout_at(deadline.into(), shutdown).await {
+        Ok(result) => result,
+        Err(_) => {
+            server.abort_all();
+            while server.join_next().await.is_some() {}
+            tracing::error!(
+                event = "server_shutdown_timeout",
+                outcome = "forced",
+                shutdown_grace_period_ms = SHUTDOWN_GRACE_PERIOD.as_millis() as u64,
+                "Shutdown deadline exceeded; unfinished tasks will recover on restart"
+            );
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "server shutdown deadline exceeded",
+            ))
+        }
     }
 }
 
@@ -204,7 +229,7 @@ fn build_http_router(app: komga_interfaces::state::HttpAppState) -> Router {
 async fn shutdown_signal(
     shutdown_tx: watch::Sender<bool>,
     mut shutdown_rx: watch::Receiver<bool>,
-    shutdown_started_tx: oneshot::Sender<()>,
+    shutdown_started_tx: oneshot::Sender<Instant>,
 ) {
     let ctrl_c = async {
         let _ = signal::ctrl_c().await;
@@ -239,48 +264,19 @@ async fn shutdown_signal(
         _ = shutdown_request => {},
     }
 
+    let _ = shutdown_started_tx.send(Instant::now() + SHUTDOWN_GRACE_PERIOD);
     let _ = shutdown_tx.send(true);
-    let _ = shutdown_started_tx.send(());
-}
-
-async fn wait_for_server_shutdown_completion(
-    server: &mut tokio::task::JoinHandle<std::io::Result<()>>,
-    shutdown_grace_period: Duration,
-) -> std::io::Result<()> {
-    match tokio::time::timeout(shutdown_grace_period, &mut *server).await {
-        Ok(result) => flatten_server_task_result(result),
-        Err(_) => {
-            tracing::warn!(
-                event = "server_shutdown_timeout",
-                outcome = "forced",
-                shutdown_grace_period_ms = shutdown_grace_period.as_millis() as u64,
-                "Server graceful shutdown exceeded deadline; aborting lingering connections",
-            );
-            server.abort();
-            match server.await {
-                Ok(result) => result,
-                Err(error) if error.is_cancelled() => Ok(()),
-                Err(error) => Err(std::io::Error::other(format!(
-                    "server shutdown task failed after abort: {error}"
-                ))),
-            }
-        }
-    }
 }
 
 fn flatten_server_task_result(
-    result: Result<std::io::Result<()>, tokio::task::JoinError>,
+    result: Option<Result<std::io::Result<()>, tokio::task::JoinError>>,
 ) -> std::io::Result<()> {
-    match result {
+    match result.expect("server task should be registered") {
         Ok(result) => result,
         Err(error) => Err(std::io::Error::other(format!(
             "server task failed to join: {error}"
         ))),
     }
-}
-
-pub(crate) async fn shutdown_runtime_for_contract() {
-    complete_shutdown_lifecycle().await;
 }
 
 fn emit_server_bind_event(listener: &TcpListener) {
@@ -303,24 +299,10 @@ async fn complete_shutdown_lifecycle() {
         outcome = "graceful",
         "Server shutdown requested",
     );
-    if close_shared_pools_with_timeout(SHUTDOWN_GRACE_PERIOD).await {
-        tracing::info!(
-            event = "shared_pool_close",
-            outcome = "closed",
-            "Closed shared sqlite pools",
-        );
-    } else {
-        tracing::warn!(
-            event = "shared_pool_close",
-            outcome = "timed_out",
-            shutdown_grace_period_ms = SHUTDOWN_GRACE_PERIOD.as_millis() as u64,
-            "Shared sqlite pool close exceeded shutdown deadline; continuing shutdown",
-        );
-    }
-}
-
-async fn close_shared_pools_with_timeout(timeout_duration: Duration) -> bool {
-    tokio::time::timeout(timeout_duration, close_all_shared_pools())
-        .await
-        .is_ok()
+    close_all_shared_pools().await;
+    tracing::info!(
+        event = "shared_pool_close",
+        outcome = "closed",
+        "Closed shared sqlite pools",
+    );
 }

@@ -77,14 +77,22 @@ impl RuntimeBackgroundState {
         &self,
         runtime: TaskRuntimeContext,
         shutdown_rx: Option<watch::Receiver<bool>>,
-    ) {
+    ) -> Vec<tokio::task::JoinHandle<()>> {
         spawn_runtime_workers(
             self.task_queue.clone(),
             self.task_execution_pool.clone(),
             runtime,
             self.task_wakeup.clone(),
             shutdown_rx,
-        );
+        )
+    }
+
+    pub fn stop_claiming(&self) {
+        self.task_execution_pool.stop_claiming();
+    }
+
+    pub async fn shutdown_executor(&self) {
+        self.task_execution_pool.shutdown().await;
     }
 
     pub async fn queued_task_counts(&self) -> anyhow::Result<BTreeMap<String, usize>> {
@@ -257,21 +265,25 @@ fn spawn_runtime_workers(
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
-) {
-    spawn_periodic_library_scan_workers(
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let periodic = spawn_periodic_library_scan_workers(
         task_queue.clone(),
         task_wakeup.clone(),
         runtime.clone(),
         shutdown_rx.clone(),
     );
-    spawn_background_task_worker(
+    let background = spawn_background_task_worker(
         task_queue,
         task_execution_pool,
         runtime.clone(),
         task_wakeup,
         shutdown_rx.clone(),
     );
-    spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
+    let cleanup = spawn_authentication_activity_cleanup_worker(runtime, shutdown_rx);
+    [periodic, background, cleanup]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 pub async fn process_startup_library_scans(runtime: TaskRuntimeContext) {
@@ -348,7 +360,7 @@ fn spawn_periodic_library_scan_workers(
     task_wakeup: TaskQueueWakeSignal,
     runtime: TaskRuntimeContext,
     shutdown_rx: Option<watch::Receiver<bool>>,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     if !runtime.worker().consumes_queue() || !runtime.job().database().owns_main_database() {
         log_worker_event(
             PERIODIC_LIBRARY_SCAN_WORKER,
@@ -362,17 +374,14 @@ fn spawn_periodic_library_scan_workers(
                 },
             ),
         );
-        return;
+        return None;
     }
 
-    let Some(handle) = current_runtime_handle_or_log_skip(PERIODIC_LIBRARY_SCAN_WORKER, &runtime)
-    else {
-        return;
-    };
+    let handle = current_runtime_handle_or_log_skip(PERIODIC_LIBRARY_SCAN_WORKER, &runtime)?;
 
     let worker_span =
         tracing::info_span!("runtime_worker", worker_id = PERIODIC_LIBRARY_SCAN_WORKER);
-    handle.spawn(
+    let worker = handle.spawn(
         async move {
             let _guard = WorkerLifecycleGuard::new(PERIODIC_LIBRARY_SCAN_WORKER, &runtime);
             let mut ticker = interval(Duration::from_secs(60));
@@ -396,6 +405,7 @@ fn spawn_periodic_library_scan_workers(
         }
         .instrument(worker_span.or_current()),
     );
+    Some(worker)
 }
 
 pub async fn run_periodic_library_scan_iteration(
@@ -449,7 +459,7 @@ fn spawn_background_task_worker(
     runtime: TaskRuntimeContext,
     task_wakeup: TaskQueueWakeSignal,
     shutdown_rx: Option<watch::Receiver<bool>>,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     if !runtime.worker().consumes_queue() {
         log_worker_event(
             BACKGROUND_TASK_WORKER,
@@ -457,15 +467,13 @@ fn spawn_background_task_worker(
             &runtime,
             RuntimeLifecycleFields::default().with_skip_reason("queue_consumption_disabled"),
         );
-        return;
+        return None;
     }
 
-    let Some(handle) = current_runtime_handle_or_log_skip(BACKGROUND_TASK_WORKER, &runtime) else {
-        return;
-    };
+    let handle = current_runtime_handle_or_log_skip(BACKGROUND_TASK_WORKER, &runtime)?;
 
     let worker_span = tracing::info_span!("runtime_worker", worker_id = BACKGROUND_TASK_WORKER);
-    handle.spawn(
+    let worker = handle.spawn(
         async move {
             let _guard = WorkerLifecycleGuard::new(BACKGROUND_TASK_WORKER, &runtime);
             let mut result_rx = task_execution_pool.take_result_receiver().expect(
@@ -505,6 +513,7 @@ fn spawn_background_task_worker(
         }
         .instrument(worker_span.or_current()),
     );
+    Some(worker)
 }
 
 pub async fn run_background_task_iteration(
@@ -516,13 +525,15 @@ pub async fn run_background_task_iteration(
     let mut result_rx = task_execution_pool
         .take_result_receiver()
         .expect("one-shot background task iteration should own the result receiver");
-    run_background_task_iteration_with_pool(
+    let result = run_background_task_iteration_with_pool(
         task_queue,
         &task_execution_pool,
         runtime,
         &mut result_rx,
     )
-    .await
+    .await;
+    task_execution_pool.shutdown().await;
+    result
 }
 
 async fn run_background_task_iteration_with_pool(
@@ -586,7 +597,7 @@ async fn run_background_task_iteration_with_pool(
 fn spawn_authentication_activity_cleanup_worker(
     runtime: TaskRuntimeContext,
     shutdown_rx: Option<watch::Receiver<bool>>,
-) {
+) -> Option<tokio::task::JoinHandle<()>> {
     if !runtime.job().database().owns_main_database() {
         log_worker_event(
             AUTHENTICATION_ACTIVITY_CLEANUP_WORKER,
@@ -594,20 +605,17 @@ fn spawn_authentication_activity_cleanup_worker(
             &runtime,
             RuntimeLifecycleFields::default().with_skip_reason("main_database_not_owned"),
         );
-        return;
+        return None;
     }
 
-    let Some(handle) =
-        current_runtime_handle_or_log_skip(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime)
-    else {
-        return;
-    };
+    let handle =
+        current_runtime_handle_or_log_skip(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime)?;
 
     let worker_span = tracing::info_span!(
         "runtime_worker",
         worker_id = AUTHENTICATION_ACTIVITY_CLEANUP_WORKER
     );
-    handle.spawn(
+    let worker = handle.spawn(
         async move {
             let _guard =
                 WorkerLifecycleGuard::new(AUTHENTICATION_ACTIVITY_CLEANUP_WORKER, &runtime);
@@ -624,6 +632,7 @@ fn spawn_authentication_activity_cleanup_worker(
         }
         .instrument(worker_span.or_current()),
     );
+    Some(worker)
 }
 
 async fn wait_for_tick_or_shutdown(

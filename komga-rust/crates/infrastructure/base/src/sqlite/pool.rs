@@ -165,12 +165,14 @@ pub async fn close_all_shared_pools() {
         let mut pools = shared_pools()
             .lock()
             .expect("shared sqlite pool map lock should not be poisoned");
-        pools.drain().map(|(_, pool)| pool).collect::<Vec<_>>()
+        pools.drain().collect::<Vec<_>>()
     };
 
-    for pool in pools {
+    futures_util::future::join_all(pools.into_iter().map(|(key, pool)| async move {
+        tracing::info!(event = "sqlite_pool_close", outcome = "started", path = %key.path.display(), max_connections = key.max_connections, total_connections = pool.size(), idle_connections = pool.num_idle(), "Closing shared sqlite pool");
         pool.close().await;
-    }
+        tracing::info!(event = "sqlite_pool_close", outcome = "closed", path = %key.path.display(), max_connections = key.max_connections, "Shared sqlite pool closed");
+    })).await;
 }
 
 pub fn evict_shared_pools_for_paths(paths: &[PathBuf]) -> Vec<SqlitePool> {

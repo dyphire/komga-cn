@@ -2796,6 +2796,7 @@ name = "komga-infrastructure-base"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "getrandom 0.4.3",
  "komga-build-support",
  "reqwest 0.13.4",
@@ -2803,6 +2804,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

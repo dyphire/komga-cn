@@ -97,7 +97,3 @@ pub async fn validate_startup_schema_gate_for_contract(
 ) -> std::io::Result<()> {
     crate::bootstrap::validate_startup_schema_gate(config).await
 }
-
-pub async fn shutdown_runtime_for_contract() {
-    crate::composition::shutdown_runtime_for_contract().await;
-}

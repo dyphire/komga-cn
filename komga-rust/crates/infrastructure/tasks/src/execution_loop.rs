@@ -62,7 +62,9 @@ impl<'a> BackgroundTaskExecutionLoop<'a> {
         state: &mut BackgroundTaskExecutionState,
     ) -> Result<usize, TaskProcessingError> {
         let mut claimed = 0usize;
-        while state.in_flight < self.task_execution_pool.desired_size() {
+        while !self.task_execution_pool.is_stopping()
+            && state.in_flight < self.task_execution_pool.desired_size()
+        {
             let task = {
                 let task_queue = self.task_queue.lock().await;
                 task_queue.take_next().await?
@@ -216,6 +218,57 @@ mod tests {
     use komga_application::task_processing::TaskExecutionOutcome;
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn shutdown_finishes_in_flight_task_and_leaves_pending_task_unclaimed() {
+        let scheduler = TaskQueueScheduler::for_config(
+            super::super::TaskQueueConfig::new(PathBuf::from("tasks.sqlite"), true),
+            "shutdown-test",
+        )
+        .await;
+        for (id, priority) in [("UpgradeIndex:running", 2), ("UpgradeIndex:pending", 1)] {
+            scheduler
+                .enqueue(TaskQueueRecord::new(id, priority, None))
+                .await
+                .unwrap();
+        }
+        let queue = Arc::new(AsyncMutex::new(scheduler));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let finish = Arc::new(tokio::sync::Notify::new());
+        let pool = TaskExecutionPoolHandle::new_for_test(1, {
+            let started = started.clone();
+            let finish = finish.clone();
+            move |_| {
+                let started = started.clone();
+                let finish = finish.clone();
+                async move {
+                    started.notify_one();
+                    finish.notified().await;
+                    Ok(TaskExecutionOutcome::completed())
+                }
+            }
+        });
+        let mut results = pool.take_result_receiver().unwrap();
+        let drain = {
+            let pool = pool.clone();
+            let queue = queue.clone();
+            tokio::spawn(async move {
+                BackgroundTaskExecutionLoop::new(&queue, &pool, &mut results)
+                    .drain()
+                    .await
+            })
+        };
+        started.notified().await;
+        pool.stop_claiming();
+        finish.notify_one();
+        assert_eq!(drain.await.unwrap().unwrap(), 1);
+        pool.shutdown().await;
+        let queue = queue.lock().await;
+        let pending = queue.take_next().await.unwrap().unwrap();
+        assert_eq!(pending.id, "UpgradeIndex:pending");
+        queue.complete(&pending.id).await.unwrap();
+        assert!(queue.take_next().await.unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn drain_finishes_in_flight_success_before_returning_first_error() {
