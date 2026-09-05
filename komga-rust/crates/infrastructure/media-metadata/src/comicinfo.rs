@@ -83,38 +83,38 @@ enum ComicInfoField {
 }
 
 impl ComicInfoField {
-    fn from_name(name: &[u8]) -> Option<Self> {
+    fn from_name(name: &str) -> Option<Self> {
         Some(match name {
-            b"Title" => Self::Title,
-            b"Series" => Self::Series,
-            b"Number" => Self::Number,
-            b"Count" => Self::Count,
-            b"Volume" => Self::Volume,
-            b"AlternateSeries" => Self::AlternateSeries,
-            b"AlternateNumber" => Self::AlternateNumber,
-            b"Summary" => Self::Summary,
-            b"Year" => Self::Year,
-            b"Month" => Self::Month,
-            b"Day" => Self::Day,
-            b"Writer" => Self::Writer,
-            b"Penciller" => Self::Penciller,
-            b"Inker" => Self::Inker,
-            b"Colorist" => Self::Colorist,
-            b"Letterer" => Self::Letterer,
-            b"CoverArtist" => Self::CoverArtist,
-            b"Editor" => Self::Editor,
-            b"Translator" => Self::Translator,
-            b"Publisher" => Self::Publisher,
-            b"Genre" => Self::Genre,
-            b"Tags" => Self::Tags,
-            b"Web" => Self::Web,
-            b"LanguageISO" => Self::LanguageIso,
-            b"Manga" => Self::Manga,
-            b"StoryArc" => Self::StoryArc,
-            b"StoryArcNumber" => Self::StoryArcNumber,
-            b"SeriesGroup" => Self::SeriesGroup,
-            b"AgeRating" => Self::AgeRating,
-            b"GTIN" => Self::Gtin,
+            "Title" => Self::Title,
+            "Series" => Self::Series,
+            "Number" => Self::Number,
+            "Count" => Self::Count,
+            "Volume" => Self::Volume,
+            "AlternateSeries" => Self::AlternateSeries,
+            "AlternateNumber" => Self::AlternateNumber,
+            "Summary" => Self::Summary,
+            "Year" => Self::Year,
+            "Month" => Self::Month,
+            "Day" => Self::Day,
+            "Writer" => Self::Writer,
+            "Penciller" => Self::Penciller,
+            "Inker" => Self::Inker,
+            "Colorist" => Self::Colorist,
+            "Letterer" => Self::Letterer,
+            "CoverArtist" => Self::CoverArtist,
+            "Editor" => Self::Editor,
+            "Translator" => Self::Translator,
+            "Publisher" => Self::Publisher,
+            "Genre" => Self::Genre,
+            "Tags" => Self::Tags,
+            "Web" => Self::Web,
+            "LanguageISO" => Self::LanguageIso,
+            "Manga" => Self::Manga,
+            "StoryArc" => Self::StoryArc,
+            "StoryArcNumber" => Self::StoryArcNumber,
+            "SeriesGroup" => Self::SeriesGroup,
+            "AgeRating" => Self::AgeRating,
+            "GTIN" => Self::Gtin,
             _ => return None,
         })
     }
@@ -181,10 +181,10 @@ pub fn parse_comicinfo_xml(xml: &[u8]) -> anyhow::Result<ComicInfoDocument> {
                 let event_name = event.name();
                 let name = local_xml_name(event_name.as_ref());
                 if depth == 0 {
-                    if name != b"ComicInfo" {
+                    if name != "ComicInfo" {
                         return Err(anyhow::anyhow!(
                             "unexpected ComicInfo root element '{}', expected 'ComicInfo'",
-                            String::from_utf8_lossy(name)
+                            name
                         ));
                     }
                     saw_root = true;
@@ -198,10 +198,10 @@ pub fn parse_comicinfo_xml(xml: &[u8]) -> anyhow::Result<ComicInfoDocument> {
             Ok(XmlEvent::Empty(event)) if depth == 0 => {
                 let event_name = event.name();
                 let name = local_xml_name(event_name.as_ref());
-                if name != b"ComicInfo" {
+                if name != "ComicInfo" {
                     return Err(anyhow::anyhow!(
                         "unexpected ComicInfo root element '{}', expected 'ComicInfo'",
-                        String::from_utf8_lossy(name)
+                        name
                     ));
                 }
                 saw_root = true;
@@ -251,23 +251,17 @@ pub fn parse_comicinfo_xml(xml: &[u8]) -> anyhow::Result<ComicInfoDocument> {
     Ok(document)
 }
 
-fn local_xml_name(name: &[u8]) -> &[u8] {
-    name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
+fn local_xml_name(name: &str) -> &str {
+    name.rsplit(':').next().unwrap_or(name)
 }
 
 fn decode_xml_text(event: &BytesText<'_>) -> anyhow::Result<String> {
-    let decoded = event
-        .decode()
-        .map_err(|error| anyhow::anyhow!(error).context("decode ComicInfo.xml text"))?;
-    let unescaped = unescape(decoded.as_ref())?;
+    let unescaped = unescape(event.as_ref())?;
     Ok(unescaped.into_owned())
 }
 
 fn decode_xml_cdata(event: &BytesCData<'_>) -> anyhow::Result<String> {
-    Ok(event
-        .decode()
-        .map_err(|error| anyhow::anyhow!(error).context("decode ComicInfo.xml CDATA"))?
-        .into_owned())
+    Ok(event.as_ref().to_owned())
 }
 
 fn decode_xml_general_ref(event: &BytesRef<'_>) -> anyhow::Result<String> {
@@ -275,8 +269,8 @@ fn decode_xml_general_ref(event: &BytesRef<'_>) -> anyhow::Result<String> {
         return Ok(character.to_string());
     }
 
-    let name = event.decode()?;
-    resolve_xml_entity(name.as_ref())
+    let name = event.as_ref();
+    resolve_xml_entity(name)
         .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!("unknown ComicInfo.xml entity '&{};'", name))
 }

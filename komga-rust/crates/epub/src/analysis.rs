@@ -360,7 +360,7 @@ fn divina_image_source(bytes: &[u8], page_name: &str) -> Result<Option<String>, 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
-                if xml_name_matches(event.name().as_ref(), b"body") {
+                if xml_name_matches(event.name().as_ref(), "body") {
                     inside_body = true;
                 }
                 if inside_body {
@@ -369,18 +369,20 @@ fn divina_image_source(bytes: &[u8], page_name: &str) -> Result<Option<String>, 
             }
             Ok(Event::Empty(event)) if inside_body => collect_image_source(&event, &mut sources)?,
             Ok(Event::Text(text)) if inside_body => {
-                text_len += String::from_utf8_lossy(text.as_ref())
+                text_len += text
+                    .as_ref()
                     .chars()
                     .filter(|character| !character.is_whitespace())
                     .count();
             }
             Ok(Event::CData(text)) if inside_body => {
-                text_len += String::from_utf8_lossy(text.as_ref())
+                text_len += text
+                    .as_ref()
                     .chars()
                     .filter(|character| !character.is_whitespace())
                     .count();
             }
-            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), b"body") => {
+            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), "body") => {
                 inside_body = false;
             }
             Ok(Event::Eof) => break,
@@ -410,10 +412,10 @@ fn collect_image_source(
     sources: &mut Vec<String>,
 ) -> Result<(), EpubAnalysisError> {
     let name = event.name();
-    let attribute = if xml_name_matches(name.as_ref(), b"img") {
-        Some(b"src".as_slice())
-    } else if xml_name_matches(name.as_ref(), b"image") {
-        Some(b"href".as_slice())
+    let attribute = if xml_name_matches(name.as_ref(), "img") {
+        Some("src")
+    } else if xml_name_matches(name.as_ref(), "image") {
+        Some("href")
     } else {
         None
     };
@@ -441,7 +443,7 @@ fn collect_image_source(
     Ok(())
 }
 
-fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+fn xml_name_matches(actual: &str, expected: &str) -> bool {
     actual == expected || actual.ends_with(expected)
 }
 
@@ -520,12 +522,12 @@ fn parse_xml_document(bytes: &[u8]) -> Result<XmlNode, EpubAnalysisError> {
                 .last_mut()
                 .expect("EPUB XML root should exist")
                 .text
-                .push_str(&String::from_utf8_lossy(text.as_ref())),
+                .push_str(text.as_ref()),
             Ok(Event::CData(text)) => stack
                 .last_mut()
                 .expect("EPUB XML root should exist")
                 .text
-                .push_str(&String::from_utf8_lossy(text.as_ref())),
+                .push_str(text.as_ref()),
             Ok(Event::End(_)) if stack.len() > 1 => {
                 let node = stack.pop().expect("EPUB XML node should exist");
                 stack
@@ -559,7 +561,7 @@ fn xml_node_from_start(event: &BytesStart<'_>) -> Result<XmlNode, EpubAnalysisEr
         let attribute = attribute.map_err(|error| {
             EpubAnalysisError::new(format!("parse EPUB navigation attribute: {error}"))
         })?;
-        let key = String::from_utf8_lossy(attribute.key.as_ref()).into_owned();
+        let key = attribute.key.as_ref().to_owned();
         let value = attribute
             .normalized_value(XmlVersion::Implicit1_0)
             .map(|value| value.into_owned())
@@ -569,7 +571,7 @@ fn xml_node_from_start(event: &BytesStart<'_>) -> Result<XmlNode, EpubAnalysisEr
         attributes.push((key, value));
     }
     Ok(XmlNode {
-        name: String::from_utf8_lossy(event.name().as_ref()).into_owned(),
+        name: event.name().as_ref().to_owned(),
         attributes,
         children: Vec::new(),
         text: String::new(),
@@ -930,7 +932,7 @@ fn kobo_span_id(event: &BytesStart<'_>) -> Result<Option<String>, EpubAnalysisEr
         let attribute = attribute.map_err(|error| {
             EpubAnalysisError::new(format!("parse KEPUB span attribute: {error}"))
         })?;
-        let name = String::from_utf8_lossy(attribute.key.as_ref());
+        let name = attribute.key.as_ref();
         let value = attribute
             .normalized_value(XmlVersion::Implicit1_0)
             .map(|value| value.into_owned())

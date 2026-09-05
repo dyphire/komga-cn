@@ -742,20 +742,20 @@ pub fn parse_comicrack_readlist(
         match reader.read_event_into(&mut buffer) {
             Ok(XmlEvent::Start(event)) => {
                 depth += 1;
-                if xml_name_matches(event.name().as_ref(), b"Name") {
+                if xml_name_matches(event.name().as_ref(), "Name") {
                     reading_name = true;
-                } else if xml_name_matches(event.name().as_ref(), b"Book") {
+                } else if xml_name_matches(event.name().as_ref(), "Book") {
                     books.push(parse_comicrack_book(&event)?);
                 }
             }
-            Ok(XmlEvent::Empty(event)) if xml_name_matches(event.name().as_ref(), b"Book") => {
+            Ok(XmlEvent::Empty(event)) if xml_name_matches(event.name().as_ref(), "Book") => {
                 books.push(parse_comicrack_book(&event)?);
             }
             Ok(XmlEvent::Text(text)) if reading_name => {
-                let value = String::from_utf8_lossy(text.as_ref()).trim().to_string();
+                let value = text.as_ref().trim().to_string();
                 readlist_name = Some(value);
             }
-            Ok(XmlEvent::End(event)) if xml_name_matches(event.name().as_ref(), b"Name") => {
+            Ok(XmlEvent::End(event)) if xml_name_matches(event.name().as_ref(), "Name") => {
                 depth = depth.saturating_sub(1);
                 reading_name = false;
             }
@@ -794,11 +794,11 @@ fn parse_comicrack_book(
 
     for attribute in event.attributes() {
         let attribute = attribute.map_err(|_| ComicRackReadListParseError::InvalidXml)?;
-        if xml_name_matches(attribute.key.as_ref(), b"Series") {
+        if xml_name_matches(attribute.key.as_ref(), "Series") {
             series = Some(comicrack_attribute_value(attribute)?);
-        } else if xml_name_matches(attribute.key.as_ref(), b"Number") {
+        } else if xml_name_matches(attribute.key.as_ref(), "Number") {
             number = Some(comicrack_attribute_value(attribute)?);
-        } else if xml_name_matches(attribute.key.as_ref(), b"Volume") {
+        } else if xml_name_matches(attribute.key.as_ref(), "Volume") {
             volume = Some(comicrack_attribute_value(attribute)?);
         }
     }
@@ -871,7 +871,7 @@ fn match_comicrack_request_book(
     }
 }
 
-fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+fn xml_name_matches(actual: &str, expected: &str) -> bool {
     actual.eq_ignore_ascii_case(expected)
 }
 

@@ -226,7 +226,7 @@ pub(super) fn parse_transient_epub_divina_image_href(
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(XmlEvent::Start(event)) => {
-                if transient_xml_name_matches(event.name().as_ref(), b"body") {
+                if transient_xml_name_matches(event.name().as_ref(), "body") {
                     inside_body = true;
                 }
                 collect_transient_epub_divina_image_source(
@@ -243,19 +243,21 @@ pub(super) fn parse_transient_epub_divina_image_href(
                 )?;
             }
             Ok(XmlEvent::Text(text)) if inside_body => {
-                text_len += String::from_utf8_lossy(text.as_ref())
+                text_len += text
+                    .as_ref()
                     .chars()
                     .filter(|character| !character.is_whitespace())
                     .count();
             }
             Ok(XmlEvent::CData(text)) if inside_body => {
-                text_len += String::from_utf8_lossy(text.as_ref())
+                text_len += text
+                    .as_ref()
                     .chars()
                     .filter(|character| !character.is_whitespace())
                     .count();
             }
             Ok(XmlEvent::End(event))
-                if transient_xml_name_matches(event.name().as_ref(), b"body") =>
+                if transient_xml_name_matches(event.name().as_ref(), "body") =>
             {
                 inside_body = false;
             }
@@ -297,10 +299,10 @@ fn collect_transient_epub_divina_image_source(
         return Ok(());
     }
 
-    let source = if transient_xml_name_matches(event.name().as_ref(), b"img") {
-        transient_xml_attribute_value_checked(event, b"src", "transient EPUB spine resource")?
-    } else if transient_xml_name_matches(event.name().as_ref(), b"image") {
-        transient_xml_attribute_value_checked(event, b"href", "transient EPUB spine resource")?
+    let source = if transient_xml_name_matches(event.name().as_ref(), "img") {
+        transient_xml_attribute_value_checked(event, "src", "transient EPUB spine resource")?
+    } else if transient_xml_name_matches(event.name().as_ref(), "image") {
+        transient_xml_attribute_value_checked(event, "href", "transient EPUB spine resource")?
     } else {
         None
     };
@@ -344,13 +346,13 @@ pub(super) fn normalize_transient_epub_zip_path(path: &str) -> String {
         .to_string()
 }
 
-fn transient_xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+fn transient_xml_name_matches(actual: &str, expected: &str) -> bool {
     actual == expected || actual.ends_with(expected)
 }
 
 fn transient_xml_attribute_value_checked(
     event: &quick_xml::events::BytesStart<'_>,
-    attribute_name: &[u8],
+    attribute_name: &str,
     document_name: &str,
 ) -> anyhow::Result<Option<String>> {
     for attribute in event.attributes() {

@@ -57,7 +57,7 @@ pub(super) fn extract_epub_book_patch(
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(XmlEvent::Start(event)) => {
-                if xml_name_matches_local(event.name().as_ref(), b"meta") {
+                if xml_name_matches_local(event.name().as_ref(), "meta") {
                     handle_epub_meta_event(
                         &event,
                         &mut current_target,
@@ -71,9 +71,7 @@ pub(super) fn extract_epub_book_patch(
                     current_text.clear();
                 }
             }
-            Ok(XmlEvent::Empty(event))
-                if xml_name_matches_local(event.name().as_ref(), b"meta") =>
-            {
+            Ok(XmlEvent::Empty(event)) if xml_name_matches_local(event.name().as_ref(), "meta") => {
                 handle_epub_meta_event(
                     &event,
                     &mut current_target,
@@ -84,10 +82,10 @@ pub(super) fn extract_epub_book_patch(
                 )?;
             }
             Ok(XmlEvent::Text(text)) if current_target.is_some() => {
-                current_text.push_str(String::from_utf8_lossy(text.as_ref()).as_ref());
+                current_text.push_str(text.as_ref());
             }
             Ok(XmlEvent::CData(text)) if current_target.is_some() => {
-                current_text.push_str(String::from_utf8_lossy(text.as_ref()).as_ref());
+                current_text.push_str(text.as_ref());
             }
             Ok(XmlEvent::End(event))
                 if epub_text_target_matches_end(current_target.as_ref(), event.name().as_ref()) =>
@@ -142,33 +140,33 @@ fn epub_text_target_from_start(
 ) -> anyhow::Result<Option<EpubTextTarget>> {
     let name = event.name();
     let name = name.as_ref();
-    if xml_name_matches_local(name, b"title") {
+    if xml_name_matches_local(name, "title") {
         Ok(Some(EpubTextTarget::Title))
-    } else if xml_name_matches_local(name, b"description") {
+    } else if xml_name_matches_local(name, "description") {
         Ok(Some(EpubTextTarget::Description))
-    } else if xml_name_matches_local(name, b"date") {
+    } else if xml_name_matches_local(name, "date") {
         Ok(Some(EpubTextTarget::Date))
-    } else if xml_name_matches_local(name, b"identifier") {
+    } else if xml_name_matches_local(name, "identifier") {
         Ok(Some(EpubTextTarget::Identifier))
-    } else if xml_name_matches_local(name, b"creator") {
+    } else if xml_name_matches_local(name, "creator") {
         Ok(Some(EpubTextTarget::Creator {
-            id: attribute_value(event, b"id")?,
-            role_attr: attribute_value(event, b"role")?,
+            id: attribute_value(event, "id")?,
+            role_attr: attribute_value(event, "role")?,
         }))
     } else {
         Ok(None)
     }
 }
 
-fn epub_text_target_matches_end(target: Option<&EpubTextTarget>, name: &[u8]) -> bool {
+fn epub_text_target_matches_end(target: Option<&EpubTextTarget>, name: &str) -> bool {
     match target {
-        Some(EpubTextTarget::Title) => xml_name_matches_local(name, b"title"),
-        Some(EpubTextTarget::Description) => xml_name_matches_local(name, b"description"),
-        Some(EpubTextTarget::Date) => xml_name_matches_local(name, b"date"),
-        Some(EpubTextTarget::Identifier) => xml_name_matches_local(name, b"identifier"),
-        Some(EpubTextTarget::Creator { .. }) => xml_name_matches_local(name, b"creator"),
+        Some(EpubTextTarget::Title) => xml_name_matches_local(name, "title"),
+        Some(EpubTextTarget::Description) => xml_name_matches_local(name, "description"),
+        Some(EpubTextTarget::Date) => xml_name_matches_local(name, "date"),
+        Some(EpubTextTarget::Identifier) => xml_name_matches_local(name, "identifier"),
+        Some(EpubTextTarget::Creator { .. }) => xml_name_matches_local(name, "creator"),
         Some(EpubTextTarget::RoleMeta { .. }) | Some(EpubTextTarget::GroupPosition { .. }) => {
-            xml_name_matches_local(name, b"meta")
+            xml_name_matches_local(name, "meta")
         }
         None => false,
     }
@@ -182,21 +180,21 @@ fn handle_epub_meta_event(
     collection_id: &mut Option<String>,
     group_positions: &mut HashMap<String, String>,
 ) -> anyhow::Result<()> {
-    let property = attribute_value(event, b"property")?;
-    let content = attribute_value(event, b"content")?;
+    let property = attribute_value(event, "property")?;
+    let content = attribute_value(event, "content")?;
 
     if property
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("role"))
     {
-        let scheme = attribute_value(event, b"scheme")?;
+        let scheme = attribute_value(event, "scheme")?;
         if !scheme
             .as_deref()
             .is_some_and(|value| value.eq_ignore_ascii_case("marc:relators"))
         {
             return Ok(());
         }
-        let refines = attribute_value(event, b"refines")?.map(normalize_epub_refines);
+        let refines = attribute_value(event, "refines")?.map(normalize_epub_refines);
         if let Some(value) = content.and_then(nonblank_string) {
             if let Some(refines) = refines {
                 refined_roles.entry(refines).or_insert(value);
@@ -210,13 +208,13 @@ fn handle_epub_meta_event(
         .is_some_and(|value| value.eq_ignore_ascii_case("belongs-to-collection"))
     {
         if collection_id.is_none() {
-            *collection_id = attribute_value(event, b"id")?.and_then(nonblank_string);
+            *collection_id = attribute_value(event, "id")?.and_then(nonblank_string);
         }
     } else if property
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("group-position"))
     {
-        let refines = attribute_value(event, b"refines")?.map(normalize_epub_refines);
+        let refines = attribute_value(event, "refines")?.map(normalize_epub_refines);
         if let Some(value) = content.and_then(nonblank_string) {
             if let Some(refines) = refines {
                 group_positions.entry(refines).or_insert(value);
@@ -385,12 +383,12 @@ pub(super) fn extract_epub_series_patch(
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(XmlEvent::Start(event)) => {
-                if xml_name_matches_local(event.name().as_ref(), b"spine") {
+                if xml_name_matches_local(event.name().as_ref(), "spine") {
                     reading_direction = page_progression_direction(&event)?.or(reading_direction);
-                } else if xml_name_matches_local(event.name().as_ref(), b"meta") {
+                } else if xml_name_matches_local(event.name().as_ref(), "meta") {
                     if let Some(target) = epub_series_text_target_from_meta(&event)? {
                         if let Some(value) =
-                            attribute_value(&event, b"content")?.and_then(nonblank_string)
+                            attribute_value(&event, "content")?.and_then(nonblank_string)
                         {
                             apply_epub_series_text_target(
                                 target,
@@ -411,12 +409,12 @@ pub(super) fn extract_epub_series_patch(
                 }
             }
             Ok(XmlEvent::Empty(event)) => {
-                if xml_name_matches_local(event.name().as_ref(), b"spine") {
+                if xml_name_matches_local(event.name().as_ref(), "spine") {
                     reading_direction = page_progression_direction(&event)?.or(reading_direction);
-                } else if xml_name_matches_local(event.name().as_ref(), b"meta")
+                } else if xml_name_matches_local(event.name().as_ref(), "meta")
                     && let Some(target) = epub_series_text_target_from_meta(&event)?
                     && let Some(value) =
-                        attribute_value(&event, b"content")?.and_then(nonblank_string)
+                        attribute_value(&event, "content")?.and_then(nonblank_string)
                 {
                     apply_epub_series_text_target(
                         target,
@@ -429,10 +427,10 @@ pub(super) fn extract_epub_series_patch(
                 }
             }
             Ok(XmlEvent::Text(text)) if current_target.is_some() => {
-                current_text.push_str(String::from_utf8_lossy(text.as_ref()).as_ref());
+                current_text.push_str(text.as_ref());
             }
             Ok(XmlEvent::CData(text)) if current_target.is_some() => {
-                current_text.push_str(String::from_utf8_lossy(text.as_ref()).as_ref());
+                current_text.push_str(text.as_ref());
             }
             Ok(XmlEvent::End(event))
                 if epub_series_text_target_matches_end(
@@ -485,7 +483,7 @@ pub(super) fn extract_epub_series_patch(
 fn epub_series_text_target_from_meta(
     event: &XmlBytesStart<'_>,
 ) -> anyhow::Result<Option<EpubSeriesTextTarget>> {
-    match attribute_value(event, b"property")?
+    match attribute_value(event, "property")?
         .as_deref()
         .unwrap_or_default()
         .trim()
@@ -500,23 +498,23 @@ fn epub_series_text_target_from_meta(
 fn epub_series_text_target_from_start(event: &XmlBytesStart<'_>) -> Option<EpubSeriesTextTarget> {
     let name = event.name();
     let name = name.as_ref();
-    if xml_name_matches_local(name, b"publisher") {
+    if xml_name_matches_local(name, "publisher") {
         Some(EpubSeriesTextTarget::Publisher)
-    } else if xml_name_matches_local(name, b"language") {
+    } else if xml_name_matches_local(name, "language") {
         Some(EpubSeriesTextTarget::Language)
-    } else if xml_name_matches_local(name, b"subject") {
+    } else if xml_name_matches_local(name, "subject") {
         Some(EpubSeriesTextTarget::Subject)
     } else {
         None
     }
 }
 
-fn epub_series_text_target_matches_end(target: Option<&EpubSeriesTextTarget>, name: &[u8]) -> bool {
+fn epub_series_text_target_matches_end(target: Option<&EpubSeriesTextTarget>, name: &str) -> bool {
     match target {
-        Some(EpubSeriesTextTarget::Collection) => xml_name_matches_local(name, b"meta"),
-        Some(EpubSeriesTextTarget::Publisher) => xml_name_matches_local(name, b"publisher"),
-        Some(EpubSeriesTextTarget::Language) => xml_name_matches_local(name, b"language"),
-        Some(EpubSeriesTextTarget::Subject) => xml_name_matches_local(name, b"subject"),
+        Some(EpubSeriesTextTarget::Collection) => xml_name_matches_local(name, "meta"),
+        Some(EpubSeriesTextTarget::Publisher) => xml_name_matches_local(name, "publisher"),
+        Some(EpubSeriesTextTarget::Language) => xml_name_matches_local(name, "language"),
+        Some(EpubSeriesTextTarget::Subject) => xml_name_matches_local(name, "subject"),
         None => false,
     }
 }
@@ -556,7 +554,7 @@ fn apply_epub_series_text_target(
 fn page_progression_direction(
     event: &XmlBytesStart<'_>,
 ) -> anyhow::Result<Option<SeriesReadingDirection>> {
-    match attribute_value(event, b"page-progression-direction")
+    match attribute_value(event, "page-progression-direction")
         .map(|value| value.unwrap_or_default())?
         .trim()
         .to_ascii_lowercase()
@@ -568,7 +566,7 @@ fn page_progression_direction(
     }
 }
 
-fn attribute_value(event: &XmlBytesStart<'_>, key: &[u8]) -> anyhow::Result<Option<String>> {
+fn attribute_value(event: &XmlBytesStart<'_>, key: &str) -> anyhow::Result<Option<String>> {
     for attribute in event.attributes() {
         let attribute = attribute.context("failed to parse EPUB package document attribute")?;
         if xml_name_matches_local(attribute.key.as_ref(), key) {
@@ -589,7 +587,7 @@ fn normalize_epub_refines(value: String) -> String {
     value.trim().trim_start_matches('#').to_string()
 }
 
-fn xml_name_matches_local(actual: &[u8], expected: &[u8]) -> bool {
+fn xml_name_matches_local(actual: &str, expected: &str) -> bool {
     actual == expected || actual.ends_with(expected)
 }
 

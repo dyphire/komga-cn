@@ -75,9 +75,9 @@ pub fn parse_epub_spine_itemrefs(package_document: &[u8]) -> Result<Vec<String>,
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) | Ok(Event::Empty(event))
-                if xml_name_matches(event.name().as_ref(), b"itemref") =>
+                if xml_name_matches(event.name().as_ref(), "itemref") =>
             {
-                if let Some(idref) = attribute_value(&event, b"idref", PACKAGE_DOCUMENT)? {
+                if let Some(idref) = attribute_value(&event, "idref", PACKAGE_DOCUMENT)? {
                     spine_ids.push(idref);
                 }
             }
@@ -103,10 +103,10 @@ fn parse_manifest_items(
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) | Ok(Event::Empty(event))
-                if xml_name_matches(event.name().as_ref(), b"item") =>
+                if xml_name_matches(event.name().as_ref(), "item") =>
             {
-                let id = attribute_value(&event, b"id", PACKAGE_DOCUMENT)?;
-                let href = attribute_value(&event, b"href", PACKAGE_DOCUMENT)?;
+                let id = attribute_value(&event, "id", PACKAGE_DOCUMENT)?;
+                let href = attribute_value(&event, "href", PACKAGE_DOCUMENT)?;
                 let Some(id) = id else {
                     buffer.clear();
                     continue;
@@ -121,9 +121,9 @@ fn parse_manifest_items(
                     EpubManifestItem {
                         id,
                         href: normalize_epub_resource_href(rootfile_path, &href),
-                        media_type: attribute_value(&event, b"media-type", PACKAGE_DOCUMENT)?
+                        media_type: attribute_value(&event, "media-type", PACKAGE_DOCUMENT)?
                             .unwrap_or_else(|| default_media_type.to_string()),
-                        properties: attribute_value(&event, b"properties", PACKAGE_DOCUMENT)?
+                        properties: attribute_value(&event, "properties", PACKAGE_DOCUMENT)?
                             .unwrap_or_default(),
                     },
                 );
@@ -147,14 +147,14 @@ pub fn parse_epub_metadata_cover_id(
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) | Ok(Event::Empty(event))
-                if xml_name_matches(event.name().as_ref(), b"meta") =>
+                if xml_name_matches(event.name().as_ref(), "meta") =>
             {
-                let name = attribute_value(&event, b"name", PACKAGE_DOCUMENT)?;
+                let name = attribute_value(&event, "name", PACKAGE_DOCUMENT)?;
                 if name
                     .as_deref()
                     .is_some_and(|value| value.eq_ignore_ascii_case("cover"))
                 {
-                    return Ok(attribute_value(&event, b"content", PACKAGE_DOCUMENT)?
+                    return Ok(attribute_value(&event, "content", PACKAGE_DOCUMENT)?
                         .filter(|value| !value.trim().is_empty()));
                 }
             }
@@ -177,20 +177,20 @@ pub fn parse_epub_guide_cover_href(
 
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) if xml_name_matches(event.name().as_ref(), b"guide") => {
+            Ok(Event::Start(event)) if xml_name_matches(event.name().as_ref(), "guide") => {
                 in_guide = true;
             }
-            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), b"guide") => {
+            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), "guide") => {
                 in_guide = false;
             }
             Ok(Event::Start(event)) | Ok(Event::Empty(event))
                 if in_guide
-                    && xml_name_matches(event.name().as_ref(), b"reference")
-                    && attribute_value(&event, b"type", PACKAGE_DOCUMENT)?
+                    && xml_name_matches(event.name().as_ref(), "reference")
+                    && attribute_value(&event, "type", PACKAGE_DOCUMENT)?
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("cover")) =>
             {
-                return attribute_value(&event, b"href", PACKAGE_DOCUMENT);
+                return attribute_value(&event, "href", PACKAGE_DOCUMENT);
             }
             Ok(Event::Eof) => break,
             Err(error) => return Err(xml_error(PACKAGE_DOCUMENT, error)),
@@ -209,9 +209,9 @@ pub fn parse_epub_rootfile_path(container_xml: &[u8]) -> Result<Option<String>, 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) | Ok(Event::Empty(event))
-                if xml_name_matches(event.name().as_ref(), b"rootfile") =>
+                if xml_name_matches(event.name().as_ref(), "rootfile") =>
             {
-                if let Some(path) = attribute_value(&event, b"full-path", CONTAINER_DOCUMENT)? {
+                if let Some(path) = attribute_value(&event, "full-path", CONTAINER_DOCUMENT)? {
                     return Ok(Some(normalize_epub_zip_path(&path)));
                 }
             }
@@ -232,27 +232,27 @@ pub fn parse_epub_fixed_layout(package_document: &[u8]) -> Result<bool, EpubPars
 
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) if xml_name_matches(event.name().as_ref(), b"meta") => {
+            Ok(Event::Start(event)) if xml_name_matches(event.name().as_ref(), "meta") => {
                 if is_fixed_layout_meta(&event)? {
                     return Ok(true);
                 }
                 awaiting_rendition_layout_text =
-                    attribute_value(&event, b"property", PACKAGE_DOCUMENT)?
+                    attribute_value(&event, "property", PACKAGE_DOCUMENT)?
                         .as_deref()
                         .is_some_and(|value| value.eq_ignore_ascii_case("rendition:layout"));
             }
-            Ok(Event::Empty(event)) if xml_name_matches(event.name().as_ref(), b"meta") => {
+            Ok(Event::Empty(event)) if xml_name_matches(event.name().as_ref(), "meta") => {
                 if is_fixed_layout_meta(&event)? {
                     return Ok(true);
                 }
             }
             Ok(Event::Text(text)) if awaiting_rendition_layout_text => {
-                let value = String::from_utf8_lossy(text.as_ref());
+                let value = text.as_ref();
                 if value.trim().eq_ignore_ascii_case("pre-paginated") {
                     return Ok(true);
                 }
             }
-            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), b"meta") => {
+            Ok(Event::End(event)) if xml_name_matches(event.name().as_ref(), "meta") => {
                 awaiting_rendition_layout_text = false;
             }
             Ok(Event::Eof) => break,
@@ -266,9 +266,9 @@ pub fn parse_epub_fixed_layout(package_document: &[u8]) -> Result<bool, EpubPars
 }
 
 fn is_fixed_layout_meta(event: &BytesStart<'_>) -> Result<bool, EpubParseError> {
-    let property = attribute_value(event, b"property", PACKAGE_DOCUMENT)?;
-    let name = attribute_value(event, b"name", PACKAGE_DOCUMENT)?;
-    let content = attribute_value(event, b"content", PACKAGE_DOCUMENT)?;
+    let property = attribute_value(event, "property", PACKAGE_DOCUMENT)?;
+    let name = attribute_value(event, "name", PACKAGE_DOCUMENT)?;
+    let content = attribute_value(event, "content", PACKAGE_DOCUMENT)?;
 
     Ok(property.as_deref().is_some_and(|value| {
         value.eq_ignore_ascii_case("rendition:layout")
@@ -355,7 +355,7 @@ fn reader_for(document: &[u8]) -> Reader<&[u8]> {
 
 fn attribute_value(
     event: &BytesStart<'_>,
-    expected_name: &[u8],
+    expected_name: &str,
     document_name: &str,
 ) -> Result<Option<String>, EpubParseError> {
     for attribute in event.attributes() {
@@ -383,7 +383,7 @@ fn xml_error(document_name: &str, error: impl fmt::Display) -> EpubParseError {
     EpubParseError::new(format!("failed to parse {document_name}: {error}"))
 }
 
-fn xml_name_matches(actual: &[u8], expected: &[u8]) -> bool {
+fn xml_name_matches(actual: &str, expected: &str) -> bool {
     actual == expected || actual.ends_with(expected)
 }
 
