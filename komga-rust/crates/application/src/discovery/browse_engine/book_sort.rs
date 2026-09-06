@@ -136,6 +136,7 @@ pub(super) fn sort_books(
                         .unwrap_or(std::cmp::Ordering::Equal)
                 }
             })
+            .then(left.id.cmp(&right.id))
     });
 }
 

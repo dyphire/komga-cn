@@ -12,81 +12,30 @@ pub fn compare_book_names(left: &str, right: &str) -> Ordering {
     compare_segments(&left, &right)
 }
 
-fn system_locale_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
+pub fn system_locale_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
     static COLLATOR: OnceLock<icu::collator::CollatorBorrowed<'static>> = OnceLock::new();
     COLLATOR.get_or_init(|| {
+        let locale = SORT_LOCALE_OVERRIDE
+            .get()
+            .cloned()
+            .flatten()
+            .unwrap_or_else(|| locale!("und"));
         let mut options = CollatorOptions::default();
         options.strength = Some(Strength::Tertiary);
-        Collator::try_new(system_locale().into(), options)
+        Collator::try_new(locale.into(), options)
             .expect("unicode collator for book name sorting should construct")
     })
 }
 
-fn system_locale() -> Locale {
-    std::env::var("LANG")
-        .or_else(|_| std::env::var("LC_ALL"))
-        .or_else(|_| std::env::var("LC_MESSAGES"))
-        .ok()
-        .as_deref()
-        .and_then(parse_locale)
-        .or_else(|| macos_system_locale())
-        .or_else(|| windows_system_locale())
-        .unwrap_or_else(|| locale!("und"))
+static SORT_LOCALE_OVERRIDE: OnceLock<Option<Locale>> = OnceLock::new();
+
+pub fn set_sort_locale(locale: Option<String>) {
+    SORT_LOCALE_OVERRIDE.get_or_init(|| locale.and_then(|l| parse_locale(&l)));
 }
 
 fn parse_locale(value: &str) -> Option<Locale> {
     let lang = value.split('.').next().unwrap_or(value).replace('_', "-");
     lang.parse().ok()
-}
-
-#[cfg(target_os = "macos")]
-fn macos_system_locale() -> Option<Locale> {
-    use std::ffi::{CStr, c_char, c_int};
-
-    unsafe extern "C" {
-        fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
-    }
-    const LC_ALL: c_int = 6;
-
-    unsafe {
-        let locale_ptr = setlocale(LC_ALL, std::ptr::null());
-        if locale_ptr.is_null() {
-            return None;
-        }
-        CStr::from_ptr(locale_ptr)
-            .to_str()
-            .ok()
-            .and_then(parse_locale)
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn macos_system_locale() -> Option<Locale> {
-    None
-}
-
-#[cfg(windows)]
-fn windows_system_locale() -> Option<Locale> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
-
-    let mut buffer = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
-    let len = unsafe {
-        GetUserDefaultLocaleName(buffer.as_mut_ptr(), buffer.len() as i32)
-    };
-
-    if len > 0 && (len as usize) < buffer.len() {
-        let locale_name = OsString::from_wide(&buffer[..len as usize - 1]);
-        locale_name.into_string().ok().and_then(|s| parse_locale(&s))
-    } else {
-        None
-    }
-}
-
-#[cfg(not(windows))]
-fn windows_system_locale() -> Option<Locale> {
-    None
 }
 
 fn book_names_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
@@ -95,7 +44,7 @@ fn book_names_collator() -> &'static icu::collator::CollatorBorrowed<'static> {
 
 enum Segment {
     Text(String),
-    Number(f64),
+    Number(String),
 }
 
 fn split_into_segments(value: &str) -> Vec<Segment> {
@@ -126,11 +75,7 @@ fn split_into_segments(value: &str) -> Vec<Segment> {
                     }
                 }
             }
-            if let Ok(num) = num_str.parse::<f64>() {
-                segments.push(Segment::Number(num));
-            } else {
-                segments.push(Segment::Text(num_str));
-            }
+            segments.push(Segment::Number(num_str));
         } else {
             let mut text = String::new();
             while let Some(&c) = chars.peek() {
@@ -171,15 +116,69 @@ fn merge_segments(segments: Vec<Segment>) -> Vec<Segment> {
     result
 }
 
+fn compare_numeric_strings(a: &str, b: &str) -> Ordering {
+    let (a_int, a_frac) = match a.split_once('.') {
+        Some((int, frac)) => (int, Some(frac)),
+        None => (a, None),
+    };
+
+    let (b_int, b_frac) = match b.split_once('.') {
+        Some((int, frac)) => (int, Some(frac)),
+        None => (b, None),
+    };
+
+    let a_int = a_int.trim_start_matches('0');
+    let b_int = b_int.trim_start_matches('0');
+
+    let a_int = if a_int.is_empty() { "0" } else { a_int };
+    let b_int = if b_int.is_empty() { "0" } else { b_int };
+
+    let int_cmp = a_int
+        .len()
+        .cmp(&b_int.len())
+        .then_with(|| a_int.cmp(b_int));
+
+    if int_cmp != Ordering::Equal {
+        return int_cmp;
+    }
+
+    match (a_frac, b_frac) {
+        (Some(a_frac), Some(b_frac)) => {
+            let max_len = a_frac.len().max(b_frac.len());
+
+            let a_frac = format!("{:<width$}", a_frac, width = max_len);
+            let b_frac = format!("{:<width$}", b_frac, width = max_len);
+
+            a_frac.cmp(&b_frac)
+        }
+
+        (None, None) => Ordering::Equal,
+
+        (Some(a_frac), None) => {
+            if a_frac.chars().all(|c| c == '0') {
+                Ordering::Equal
+            } else {
+                Ordering::Greater
+            }
+        }
+
+        (None, Some(b_frac)) => {
+            if b_frac.chars().all(|c| c == '0') {
+                Ordering::Equal
+            } else {
+                Ordering::Less
+            }
+        }
+    }
+}
+
 fn compare_segments(left: &[Segment], right: &[Segment]) -> Ordering {
     use std::cmp::Ordering;
     let mut left_iter = left.iter();
     let mut right_iter = right.iter();
     while let (Some(l), Some(r)) = (left_iter.next(), right_iter.next()) {
         let ordering = match (l, r) {
-            (Segment::Number(nl), Segment::Number(nr)) => {
-                nl.partial_cmp(nr).unwrap_or(Ordering::Equal)
-            }
+            (Segment::Number(nl), Segment::Number(nr)) => compare_numeric_strings(nl, nr),
             (Segment::Text(tl), Segment::Text(tr)) => book_names_collator().compare(tl, tr),
             (Segment::Number(_), Segment::Text(_)) => Ordering::Less,
             (Segment::Text(_), Segment::Number(_)) => Ordering::Greater,

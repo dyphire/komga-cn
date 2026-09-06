@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use config::Config as LayeredConfig;
 
 use super::super::cli_args::{
-    CONFIG_DIR_ENV, MODE_ENV, PLATFORM_PROFILE_ENV, RUNTIME_PROFILE_ENV, RuntimeCli,
-    SPRING_PROFILES_ACTIVE_ENV,
+    CONFIG_DIR_ENV, FONTS_DATA_DIRECTORY_ENV, LUCENE_DATA_DIRECTORY_ENV, MODE_ENV,
+    PLATFORM_PROFILE_ENV, RUNTIME_PROFILE_ENV, RuntimeCli, SORT_LOCALE_ENV, SPRING_PROFILES_ACTIVE_ENV,
 };
 use super::super::env_config::{
     AdminActionConfig, DEFAULT_SESSION_MAX_INACTIVE_SECONDS, RuntimeConfig,
@@ -139,6 +139,25 @@ fn resolve_session_max_inactive_seconds(
         .unwrap_or(DEFAULT_SESSION_MAX_INACTIVE_SECONDS)
 }
 
+fn resolve_sort_locale(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+) -> Option<String> {
+    env.get(SORT_LOCALE_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            read_string(
+                layered,
+                &[
+                    "komga.sortLocale",
+                    "komga.sort-locale",
+                    "komga.sort_locale",
+                ],
+            )
+        })
+}
+
 struct ResolvedConfigInputs {
     layered: LayeredConfig,
     resolved_config_dir: PathBuf,
@@ -252,6 +271,7 @@ pub(crate) fn resolve_with_env(
     let oauth2_account_creation = resolve_oauth2_account_creation(&layered, env)?;
     let oidc_email_verification = resolve_oidc_email_verification(&layered, env)?;
     let session_max_inactive_seconds = resolve_session_max_inactive_seconds(&layered, env);
+    let sort_locale = resolve_sort_locale(&layered, env);
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
     let demo_mode = active_profiles_contain_demo(&layered, env);
@@ -280,6 +300,7 @@ pub(crate) fn resolve_with_env(
         writer_ownership_policy,
         session_max_inactive_seconds,
         task_pool_size: 1,
+        sort_locale,
     };
 
     config.validate_single_writer_storage_ownership(env)?;

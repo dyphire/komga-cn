@@ -16,6 +16,7 @@ pub(crate) const DATABASE_FILE_ENV: &str = "KOMGA_DATABASE_FILE";
 pub(crate) const TASKS_DB_FILE_ENV: &str = "KOMGA_TASKS_DB_FILE";
 pub(crate) const LUCENE_DATA_DIRECTORY_ENV: &str = "KOMGA_LUCENE_DATA_DIRECTORY";
 pub(crate) const FONTS_DATA_DIRECTORY_ENV: &str = "KOMGA_FONTS_DATA_DIRECTORY";
+pub(crate) const SORT_LOCALE_ENV: &str = "KOMGA_SORT_LOCALE";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RuntimeCli {

@@ -16,6 +16,7 @@ use super::startup_policy::{
 use super::writer_ownership::WriterOwnershipPolicy;
 
 pub const DEFAULT_SESSION_MAX_INACTIVE_SECONDS: u64 = 30 * 24 * 60 * 60;
+pub const DEFAULT_SORT_LOCALE: Option<String> = None;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OAuth2ClientConfig {
@@ -58,6 +59,7 @@ pub struct RuntimeConfig {
     pub writer_ownership_policy: WriterOwnershipPolicy,
     pub session_max_inactive_seconds: u64,
     pub task_pool_size: usize,
+    pub sort_locale: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -154,6 +156,7 @@ impl RuntimeConfig {
             },
             session_max_inactive_seconds: DEFAULT_SESSION_MAX_INACTIVE_SECONDS,
             task_pool_size: 1,
+            sort_locale: DEFAULT_SORT_LOCALE,
         }
     }
 
