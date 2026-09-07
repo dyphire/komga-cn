@@ -85,7 +85,7 @@ pub async fn render_book_page_thumbnail(
     let Some(bytes) = resolve_book_page_bytes(media, page, page_number).await? else {
         return Ok(None);
     };
-    render_image_thumbnail(&bytes, max_edge, output_format).map(Some)
+    render_image_thumbnail(bytes, max_edge, output_format).map(Some)
 }
 
 pub async fn load_archive_page_row(
@@ -331,12 +331,12 @@ async fn render_pdf_page_thumbnail(
 }
 
 fn render_image_thumbnail(
-    bytes: &[u8],
+    bytes: Vec<u8>,
     max_edge: u32,
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<RenderedImage> {
     let image =
-        image::load_from_memory(bytes).context("render image thumbnail: decode image bytes")?;
+        image::load_from_memory(&bytes).context("render image thumbnail: decode image bytes")?;
     let dimensions = RasterImageDimensions::from_image(&image);
     let resized = if dimensions.max_edge() > max_edge {
         image.resize(max_edge, max_edge, FilterType::Lanczos3)
