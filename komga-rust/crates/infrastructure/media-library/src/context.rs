@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::SqlitePool;
 
-use komga_infrastructure_base::DatabaseHandle;
+use komga_infrastructure_base::{DatabaseHandle, RiirDatabase};
 
 #[derive(Clone)]
 pub struct MediaLibraryJobContext {
@@ -13,6 +13,7 @@ pub struct MediaLibraryJobContext {
     owns_filesystem_scan_output: bool,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
     runtime_state: Arc<MediaLibraryRuntimeState>,
+    riir_db: Option<RiirDatabase>,
 }
 
 #[derive(Default)]
@@ -35,6 +36,7 @@ impl MediaLibraryJobContext {
         owns_main_database: bool,
         owns_filesystem_scan_output: bool,
         runtime_events: Arc<dyn RuntimeSseEventSink>,
+        riir_db: Option<RiirDatabase>,
     ) -> Self {
         Self {
             main_db,
@@ -42,7 +44,12 @@ impl MediaLibraryJobContext {
             owns_filesystem_scan_output,
             runtime_events,
             runtime_state: Arc::new(MediaLibraryRuntimeState::default()),
+            riir_db,
         }
+    }
+
+    pub fn riir_db(&self) -> Option<&RiirDatabase> {
+        self.riir_db.as_ref()
     }
 
     pub fn database(&self) -> MediaLibraryDatabaseContext<'_> {

@@ -50,3 +50,34 @@ impl DatabaseHandle {
         &self.write_pool
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct RiirDatabase {
+    database_file: PathBuf,
+    read_pool: SqlitePool,
+    write_pool: SqlitePool,
+}
+
+impl RiirDatabase {
+    pub async fn file_backed(database_file: PathBuf) -> Result<Self, sqlx::Error> {
+        let read_pool = connect_read_pool(&database_file).await?;
+        let write_pool = connect_write_pool(&database_file).await?;
+        Ok(Self {
+            database_file,
+            read_pool,
+            write_pool,
+        })
+    }
+
+    pub fn database_file(&self) -> &Path {
+        self.database_file.as_path()
+    }
+
+    pub fn read_pool(&self) -> &SqlitePool {
+        &self.read_pool
+    }
+
+    pub fn write_pool(&self) -> &SqlitePool {
+        &self.write_pool
+    }
+}

@@ -5,7 +5,7 @@ use config::Config as LayeredConfig;
 
 use crate::cli_args::{
     DATABASE_FILE_ENV, FONTS_DATA_DIRECTORY_ENV, LOG_FILE_ENV, LUCENE_DATA_DIRECTORY_ENV,
-    RuntimeCli, TASKS_DB_FILE_ENV,
+    METADATA_CACHE_DB_FILE_ENV, RuntimeCli, TASKS_DB_FILE_ENV,
 };
 use crate::profile::{DEFAULT_CONFIG_DIR, DEFAULT_LOG_FILE_NAME, PlatformProfile};
 
@@ -14,6 +14,7 @@ pub(crate) struct DerivedRuntimePaths {
     pub(crate) log_file: PathBuf,
     pub(crate) database_file: PathBuf,
     pub(crate) tasks_db_file: PathBuf,
+    pub(crate) metadata_cache_db_file: PathBuf,
     pub(crate) lucene_data_directory: PathBuf,
     pub(crate) fonts_data_directory: PathBuf,
 }
@@ -73,6 +74,13 @@ pub(crate) fn resolve_derived_runtime_paths(
         .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
         .unwrap_or_else(|| resolved_config_dir.join("tasks.sqlite"));
 
+    let metadata_cache_db_file = env
+        .get(METADATA_CACHE_DB_FILE_ENV)
+        .cloned()
+        .or_else(|| read_string(layered, &["komga.metadata-cache-db.file"]))
+        .map(|value| PathBuf::from(expand_path_placeholders(&value, resolved_config_dir, env)))
+        .unwrap_or_else(|| resolved_config_dir.join("riir.sqlite"));
+
     let lucene_data_directory = env
         .get(LUCENE_DATA_DIRECTORY_ENV)
         .cloned()
@@ -101,6 +109,7 @@ pub(crate) fn resolve_derived_runtime_paths(
         log_file,
         database_file,
         tasks_db_file,
+        metadata_cache_db_file,
         lucene_data_directory,
         fonts_data_directory,
     }

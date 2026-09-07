@@ -7,7 +7,7 @@ use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
-use komga_infrastructure_base::resolve_rooted_path;
+use komga_infrastructure_base::{resolve_rooted_path, RiirDatabase};
 use komga_infrastructure_media_core::content::epub_resources::load_epub_package_document;
 
 use super::SeriesMetadataImportPatch;
@@ -144,7 +144,7 @@ async fn load_series_books_for_refresh(
 }
 
 async fn load_comicinfo_series_patch_for_book(
-    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     source: &SeriesBookRefreshSource,
     append_volume_to_title: bool,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
@@ -158,7 +158,7 @@ async fn load_comicinfo_series_patch_for_book(
         return Ok(None);
     }
 
-    let xml = match load_cached_comicinfo_bytes(pool, &source.book_id).await? {
+    let xml = match load_cached_comicinfo_bytes(riir_db, &source.book_id).await? {
         CacheLookup::Found(Some(xml)) => xml,
         CacheLookup::Found(None) => return Ok(None),
         CacheLookup::NotFound => match load_comicinfo_bytes_for_media(&source.media)? {
@@ -179,14 +179,14 @@ async fn load_comicinfo_series_patch_for_book(
 }
 
 async fn load_epub_series_patch_for_book(
-    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     source: &SeriesBookRefreshSource,
 ) -> anyhow::Result<Option<SeriesMetadataImportPatch>> {
     if !book_media_is_epub(&source.media) {
         return Ok(None);
     }
 
-    let package_document = match load_cached_epub_package_document(pool, &source.book_id).await? {
+    let package_document = match load_cached_epub_package_document(riir_db, &source.book_id).await? {
         CacheLookup::Found(Some(doc)) => doc,
         CacheLookup::Found(None) => return Ok(None),
         CacheLookup::NotFound => match load_epub_package_document(&source.media).await? {
@@ -701,6 +701,7 @@ pub(super) async fn apply_mylar_series_import(
 )]
 pub(super) async fn apply_series_metadata_from_book_imports(
     pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
     library_root: &Path,
@@ -719,7 +720,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
         let mut patches = Vec::new();
         for source in &books {
             if let Some(patch) =
-                load_comicinfo_series_patch_for_book(pool, source, import_comicinfo_series_append_volume).await?
+                load_comicinfo_series_patch_for_book(riir_db, source, import_comicinfo_series_append_volume).await?
             {
                 patches.push(patch);
             }
@@ -745,7 +746,7 @@ pub(super) async fn apply_series_metadata_from_book_imports(
     if import_epub_series {
         let mut patches = Vec::new();
         for source in &books {
-            if let Some(patch) = load_epub_series_patch_for_book(pool, source).await? {
+            if let Some(patch) = load_epub_series_patch_for_book(riir_db, source).await? {
                 patches.push(patch);
             }
         }

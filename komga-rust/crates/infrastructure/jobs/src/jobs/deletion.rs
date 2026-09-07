@@ -13,6 +13,12 @@ pub(crate) async fn execute_empty_trash(
         )
         .await
         .map_err(TaskProcessingError::runtime)?;
+        komga_infrastructure_discovery::delete_library_book_metadata_cache_rows(
+            runtime.riir_db(),
+            library_id,
+        )
+        .await
+        .map_err(TaskProcessingError::runtime)?;
         let policy = runtime
             .cleanup_empty_sets_policy()
             .await

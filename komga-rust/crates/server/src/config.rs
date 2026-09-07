@@ -9,6 +9,7 @@ use komga_infrastructure_base::{
 use komga_infrastructure_jobs::{
     TaskRuntimeContext, TaskRuntimeContextParams, TaskRuntimeOwnership,
 };
+use komga_infrastructure_base::{bootstrap_riir_pool, RiirDatabase};
 
 pub(crate) async fn task_runtime_context(
     config: &RuntimeConfig,
@@ -23,8 +24,21 @@ pub(crate) async fn task_runtime_context(
     let task_read_pool = connect_task_pool(main_db.database_file(), default_read_max_connections())
         .await
         .expect("failed to create private read pool");
+
+    let riir_db = match RiirDatabase::file_backed(config.metadata_cache_db_file.clone()).await {
+        Ok(db) => Some(db),
+        Err(error) => panic!("failed to open metadata cache database: {error}"),
+    };
+
+    if let Some(ref riir_db) = riir_db {
+        bootstrap_riir_pool(riir_db.write_pool(), Some(main_db.write_pool()))
+            .await
+            .expect("failed to bootstrap metadata cache database");
+    }
+
     TaskRuntimeContext::new(TaskRuntimeContextParams {
         main_db,
+        riir_db,
         tasks_db_file: config.tasks_db_file.clone(),
         lucene_data_directory: config.lucene_data_directory.clone(),
         consumes_queue: config

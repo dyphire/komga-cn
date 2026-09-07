@@ -271,6 +271,7 @@ pub(crate) fn resolve_with_env(
         log_file: derived_paths.log_file,
         database_file: derived_paths.database_file,
         tasks_db_file: derived_paths.tasks_db_file,
+        metadata_cache_db_file: derived_paths.metadata_cache_db_file,
         lucene_data_directory: derived_paths.lucene_data_directory,
         fonts_data_directory: derived_paths.fonts_data_directory,
         oauth2_clients,
@@ -299,6 +300,7 @@ pub(crate) fn resolve_admin_action_with_env(
 
     Ok(AdminActionConfig {
         database_file: derived_paths.database_file,
+        metadata_cache_db_file: derived_paths.metadata_cache_db_file,
     })
 }
 

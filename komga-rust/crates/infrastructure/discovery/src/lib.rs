@@ -13,8 +13,8 @@ pub mod set_persistence;
 pub mod visibility;
 
 pub use deletion::{
-    cleanup_empty_sets_rows, delete_book_dependency_rows, delete_series_dependency_rows,
-    empty_trash_rows,
+    cleanup_empty_sets_rows, delete_book_dependency_rows, delete_library_book_metadata_cache_rows,
+    delete_series_dependency_rows, empty_trash_rows,
 };
 pub use detail_adapter::DiscoveryDetailAccess;
 pub use libraries::LibraryCatalogAccess;

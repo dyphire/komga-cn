@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use super::LibraryScanner;
 use super::follow_up::ScanFollowUpPlanner;
 use komga_infrastructure_discovery::{cleanup_empty_sets_rows, empty_trash_rows};
+use komga_infrastructure_base::RiirDatabase;
 
 async fn load_library_scan_profiles(pool: &SqlitePool) -> anyhow::Result<Vec<LibraryScanProfile>> {
     let rows = sqlx::query(
@@ -57,6 +58,7 @@ pub struct SqliteFilesystemLibraryScanPipeline {
     task_write_pool: SqlitePool,
     cleanup_empty_sets_policy: CleanupEmptySetsPolicy,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
+    riir_db: Option<RiirDatabase>,
 }
 
 impl SqliteFilesystemLibraryScanPipeline {
@@ -71,6 +73,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             task_write_pool: runtime.database().write_pool().clone(),
             cleanup_empty_sets_policy,
             runtime_events: runtime.runtime_events_arc(),
+            riir_db: runtime.riir_db().cloned(),
         })
     }
 
@@ -198,7 +201,14 @@ impl SqliteFilesystemLibraryScanPipeline {
 
         empty_trash_rows(&self.task_write_pool, library_id)
             .await
-            .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))
+            .map_err(|error| TaskProcessingError::runtime(format!("empty trash: {error}")))?;
+        komga_infrastructure_discovery::delete_library_book_metadata_cache_rows(
+            self.riir_db.as_ref(),
+            library_id,
+        )
+        .await
+        .map_err(|error| TaskProcessingError::runtime(format!("empty trash metadata cache: {error}")))?;
+        Ok(())
     }
 }
 
@@ -213,6 +223,7 @@ impl Default for SqliteFilesystemLibraryScanPipeline {
             task_write_pool: pool,
             cleanup_empty_sets_policy: CleanupEmptySetsPolicy::default(),
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: None,
         }
     }
 }
@@ -261,6 +272,7 @@ impl SqliteFilesystemLibraryScanPipeline {
             task_write_pool: write_pool,
             cleanup_empty_sets_policy: CleanupEmptySetsPolicy::default(),
             runtime_events: Arc::new(RuntimeSseEventStore::default()),
+            riir_db: None,
         }
     }
 

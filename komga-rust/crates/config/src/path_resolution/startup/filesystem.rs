@@ -7,6 +7,7 @@ pub(crate) fn ensure_runtime_directories(
     log_file: &Path,
     database_file: &Path,
     tasks_db_file: &Path,
+    metadata_cache_db_file: &Path,
     lucene_data_directory: &Path,
     fonts_data_directory: &Path,
 ) -> Result<(), ConfigError> {
@@ -19,6 +20,9 @@ pub(crate) fn ensure_runtime_directories(
         create_dir(parent)?;
     }
     if let Some(parent) = tasks_db_file.parent() {
+        create_dir(parent)?;
+    }
+    if let Some(parent) = metadata_cache_db_file.parent() {
         create_dir(parent)?;
     }
     create_dir(lucene_data_directory)?;

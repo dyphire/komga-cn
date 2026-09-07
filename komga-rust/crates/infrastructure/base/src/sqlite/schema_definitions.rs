@@ -8,6 +8,10 @@ pub(super) const TASKS_PREFIX_SCHEMA_INVENTORIES_JSON: &str = include_str!(conca
     env!("OUT_DIR"),
     "/sqlx-migrations/tasks-prefix-schema-inventories.json"
 ));
+pub(super) const RIIR_PREFIX_SCHEMA_INVENTORIES_JSON: &str = include_str!(concat!(
+    env!("OUT_DIR"),
+    "/sqlx-migrations/riir-prefix-schema-inventories.json"
+));
 
 #[derive(Deserialize)]
 pub(super) struct PrefixSchemaInventory {
@@ -611,3 +615,15 @@ pub(super) const LEGACY_MAIN_SCHEMA_V20200706141854: &[(&str, &[&str])] = &[
 ];
 
 pub(super) const LEGACY_MAIN_SCHEMA_V20200706141854_VERSION: i64 = 20200706141854;
+
+pub(super) const REQUIRED_RIIR_SCHEMA: &[(&str, &[&str])] = &[(
+    "book_metadata_cache",
+    &[
+        "book_id",
+        "comicinfo_blob",
+        "epub_package_blob",
+        "comicinfo_hash",
+        "epub_package_hash",
+        "last_modified_date",
+    ],
+)];

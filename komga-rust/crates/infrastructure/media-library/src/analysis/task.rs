@@ -92,9 +92,14 @@ pub async fn analyze_book(
     };
     let current_page_count = persisted.page_count.min(i64::MAX as u64) as i64;
 
-    persist_book_analysis(runtime.database().write_pool(), &book_id, &persisted)
-        .await
-        .map_err(TaskProcessingError::runtime)?;
+    persist_book_analysis(
+        runtime.database().write_pool(),
+        runtime.riir_db(),
+        &book_id,
+        &persisted,
+    )
+    .await
+    .map_err(TaskProcessingError::runtime)?;
 
     adjust_analyzed_book_read_progress(
         runtime.database().write_pool(),

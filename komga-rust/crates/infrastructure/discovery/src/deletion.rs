@@ -4,12 +4,13 @@ use komga_domain::discovery::compare_book_names;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
+use komga_infrastructure_base::RiirDatabase;
+
 const EMPTY_TRASH_BOOK_DEPENDENCY_SQL: &[&str] = &[
     "DELETE FROM BOOK_METADATA WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
-    "DELETE FROM BOOK_METADATA_CACHE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM MEDIA WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM MEDIA_FILE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
     "DELETE FROM MEDIA_PAGE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
@@ -38,7 +39,6 @@ const BOOK_DEPENDENCY_SQL: &[&str] = &[
     "DELETE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ?",
     "DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?",
     "DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?",
-    "DELETE FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ?",
     "DELETE FROM MEDIA WHERE BOOK_ID = ?",
     "DELETE FROM MEDIA_FILE WHERE BOOK_ID = ?",
     "DELETE FROM MEDIA_PAGE WHERE BOOK_ID = ?",
@@ -70,6 +70,38 @@ pub async fn delete_book_dependency_rows(pool: &SqlitePool, book_id: &str) -> an
             .await
             .with_context(|| format!("delete book dependency rows for '{book_id}'"))?;
     }
+    Ok(())
+}
+
+pub async fn delete_book_metadata_cache_rows(
+    riir_db: Option<&RiirDatabase>,
+    book_id: &str,
+) -> anyhow::Result<()> {
+    let Some(riir_db) = riir_db else {
+        return Ok(());
+    };
+    sqlx::query("DELETE FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ?")
+        .bind(book_id)
+        .execute(riir_db.write_pool())
+        .await
+        .with_context(|| format!("delete book metadata cache rows for '{book_id}'"))?;
+    Ok(())
+}
+
+pub async fn delete_library_book_metadata_cache_rows(
+    riir_db: Option<&RiirDatabase>,
+    library_id: &str,
+) -> anyhow::Result<()> {
+    let Some(riir_db) = riir_db else {
+        return Ok(());
+    };
+    sqlx::query(
+        "DELETE FROM BOOK_METADATA_CACHE WHERE BOOK_ID IN (SELECT ID FROM BOOK WHERE LIBRARY_ID = ? AND DELETED_DATE IS NOT NULL)",
+    )
+    .bind(library_id)
+    .execute(riir_db.write_pool())
+    .await
+    .with_context(|| format!("delete library book metadata cache rows for '{library_id}'"))?;
     Ok(())
 }
 

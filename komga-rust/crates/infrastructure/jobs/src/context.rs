@@ -6,7 +6,7 @@ use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_application::task_processing::{CleanupEmptySetsPolicy, ThumbnailRegenerationPolicy};
 use sqlx::SqlitePool;
 
-use komga_infrastructure_base::{DatabaseHandle, SqlitePersistenceContext};
+use komga_infrastructure_base::{DatabaseHandle, RiirDatabase, SqlitePersistenceContext};
 use komga_infrastructure_media_library::MediaLibraryJobContext;
 use komga_infrastructure_operational::ServerSettingsStore;
 use komga_infrastructure_search::engine::SearchIndexEngine;
@@ -14,6 +14,7 @@ use komga_infrastructure_search::engine::SearchIndexEngine;
 #[derive(Clone)]
 pub struct TaskRuntimeContext {
     main_db: DatabaseHandle,
+    riir_db: Option<RiirDatabase>,
     tasks_db_file: PathBuf,
     lucene_data_directory: PathBuf,
     consumes_queue: bool,
@@ -27,6 +28,7 @@ pub struct TaskRuntimeContext {
 
 pub struct TaskRuntimeContextParams {
     pub main_db: DatabaseHandle,
+    pub riir_db: Option<RiirDatabase>,
     pub tasks_db_file: PathBuf,
     pub lucene_data_directory: PathBuf,
     pub consumes_queue: bool,
@@ -85,6 +87,7 @@ impl TaskRuntimeContext {
     pub fn new(params: TaskRuntimeContextParams) -> Self {
         let TaskRuntimeContextParams {
             main_db,
+            riir_db,
             tasks_db_file,
             lucene_data_directory,
             consumes_queue,
@@ -99,9 +102,11 @@ impl TaskRuntimeContext {
             ownership.owns_main_database,
             ownership.owns_filesystem_scan_output,
             runtime_events.clone(),
+            riir_db.clone(),
         );
         Self {
             main_db,
+            riir_db,
             tasks_db_file,
             lucene_data_directory,
             consumes_queue,
@@ -152,6 +157,10 @@ impl JobRuntime<'_> {
         SearchRuntime {
             runtime: self.runtime,
         }
+    }
+
+    pub fn riir_db(&self) -> Option<&RiirDatabase> {
+        self.runtime.riir_db.as_ref()
     }
 
     pub(crate) fn search_engine(&self) -> SearchIndexEngine {

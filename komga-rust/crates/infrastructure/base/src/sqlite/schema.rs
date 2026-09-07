@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::{Row, SqlStr, SqliteConnection, SqlitePool};
 
+use crate::connect_read_pool;
+
 mod embedded_migrations {
     include!(concat!(
         env!("OUT_DIR"),
@@ -14,14 +16,16 @@ mod embedded_migrations {
 use super::schema_definitions::{
     LEGACY_MAIN_SCHEMA_V20200706141854, LEGACY_MAIN_SCHEMA_V20200706141854_VERSION,
     MAIN_PREFIX_SCHEMA_INVENTORIES_JSON, PrefixSchemaInventory, REQUIRED_MAIN_SCHEMA,
-    REQUIRED_TASKS_SCHEMA, SchemaInventoryObject, TASKS_PREFIX_SCHEMA_INVENTORIES_JSON,
+    REQUIRED_RIIR_SCHEMA, REQUIRED_TASKS_SCHEMA, RIIR_PREFIX_SCHEMA_INVENTORIES_JSON,
+    SchemaInventoryObject, TASKS_PREFIX_SCHEMA_INVENTORIES_JSON,
 };
-use embedded_migrations::{EmbeddedMigration, MAIN_EMBEDDED_MIGRATIONS, TASKS_EMBEDDED_MIGRATIONS};
+use embedded_migrations::{EmbeddedMigration, MAIN_EMBEDDED_MIGRATIONS, RIIR_EMBEDDED_MIGRATIONS, TASKS_EMBEDDED_MIGRATIONS};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum SchemaTarget {
     Main,
     Tasks,
+    Riir,
 }
 
 struct ComparableSchemaInventoryObject {
@@ -62,6 +66,52 @@ pub async fn bootstrap_tasks_pool(pool: &SqlitePool) -> Result<(), sqlx::Error> 
     .await
 }
 
+pub async fn bootstrap_riir_pool(
+    pool: &SqlitePool,
+    main_pool: Option<&SqlitePool>,
+) -> Result<(), sqlx::Error> {
+    let mut connection = pool.acquire().await?;
+    bootstrap_or_migrate_schema(
+        connection.as_mut(),
+        riir_migrator(),
+        REQUIRED_RIIR_SCHEMA,
+        SchemaTarget::Riir,
+    )
+    .await?;
+
+    if let Some(main_pool) = main_pool {
+        migrate_book_metadata_cache_to_riir(main_pool, pool).await?;
+    }
+
+    Ok(())
+}
+
+async fn migrate_book_metadata_cache_to_riir(
+    main_pool: &SqlitePool,
+    riir_pool: &SqlitePool,
+) -> Result<(), sqlx::Error> {
+    let mut main_conn = main_pool.acquire().await?;
+    if !table_exists(main_conn.as_mut(), "BOOK_METADATA_CACHE").await? {
+        return Ok(());
+    }
+
+    let mut riir_conn = riir_pool.acquire().await?;
+
+    sqlx::query(
+        r#"INSERT INTO BOOK_METADATA_CACHE (BOOK_ID, COMICINFO_BLOB, EPUB_PACKAGE_BLOB, COMICINFO_HASH, EPUB_PACKAGE_HASH, LAST_MODIFIED_DATE)
+           SELECT BOOK_ID, COMICINFO_BLOB, EPUB_PACKAGE_BLOB, COMICINFO_HASH, EPUB_PACKAGE_HASH, LAST_MODIFIED_DATE
+           FROM BOOK_METADATA_CACHE"#,
+    )
+    .execute(riir_conn.as_mut())
+    .await?;
+
+    sqlx::query("DROP TABLE IF EXISTS BOOK_METADATA_CACHE")
+        .execute(main_conn.as_mut())
+        .await?;
+
+    Ok(())
+}
+
 fn main_migrator() -> &'static Migrator {
     static MIGRATOR: OnceLock<Migrator> = OnceLock::new();
     MIGRATOR.get_or_init(|| build_migrator(MAIN_EMBEDDED_MIGRATIONS))
@@ -70,6 +120,11 @@ fn main_migrator() -> &'static Migrator {
 fn tasks_migrator() -> &'static Migrator {
     static MIGRATOR: OnceLock<Migrator> = OnceLock::new();
     MIGRATOR.get_or_init(|| build_migrator(TASKS_EMBEDDED_MIGRATIONS))
+}
+
+fn riir_migrator() -> &'static Migrator {
+    static MIGRATOR: OnceLock<Migrator> = OnceLock::new();
+    MIGRATOR.get_or_init(|| build_migrator(RIIR_EMBEDDED_MIGRATIONS))
 }
 
 fn build_migrator(migrations: &[EmbeddedMigration]) -> Migrator {
@@ -98,6 +153,7 @@ async fn bootstrap_or_migrate_schema(
     required_schema: &[(&str, &[&str])],
     target: SchemaTarget,
 ) -> Result<(), sqlx::Error> {
+    cleanup_orphaned_sqlx_migrations(connection, migrator).await?;
     adopt_preexisting_schema(connection, migrator, required_schema, target).await?;
     migrator
         .run_direct(None, connection, false)
@@ -181,6 +237,77 @@ async fn has_applied_sqlx_migrations(
         .fetch_one(&mut *connection)
         .await?;
     Ok(count > 0)
+}
+
+async fn cleanup_orphaned_sqlx_migrations(
+    connection: &mut SqliteConnection,
+    migrator: &Migrator,
+) -> Result<(), sqlx::Error> {
+    if !table_exists(connection, "_sqlx_migrations").await? {
+        return Ok(());
+    }
+
+    let embedded_versions: Vec<i64> = migrator
+        .iter()
+        .map(|m| m.version)
+        .collect::<Vec<_>>();
+
+    let applied_versions: Vec<i64> = sqlx::query_scalar(
+        r#"SELECT version FROM _sqlx_migrations WHERE version IS NOT NULL ORDER BY version"#,
+    )
+    .fetch_all(&mut *connection)
+    .await?;
+
+    let embedded_set: std::collections::HashSet<i64> = embedded_versions.into_iter().collect();
+
+    for version in applied_versions {
+        if embedded_set.contains(&version) {
+            continue;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn migrate_book_metadata_cache_to_riir_if_orphaned(
+    main_pool: &SqlitePool,
+    riir_db_file: &std::path::Path,
+) -> Result<(), sqlx::Error> {
+    let mut main_conn = main_pool.acquire().await?;
+
+    let has_orphaned_record = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 20260824120000",
+    )
+    .fetch_one(main_conn.as_mut())
+    .await? > 0;
+
+    if !has_orphaned_record {
+        return Ok(());
+    }
+
+    let table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND LOWER(name) = LOWER('BOOK_METADATA_CACHE')",
+    )
+    .fetch_one(main_conn.as_mut())
+    .await? > 0;
+
+    if !table_exists {
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+            .bind(20260824120000_i64)
+            .execute(main_conn.as_mut())
+            .await?;
+        return Ok(());
+    }
+
+    let riir_pool = connect_read_pool(riir_db_file).await?;
+    bootstrap_riir_pool(&riir_pool, Some(main_pool)).await?;
+
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ?")
+        .bind(20260824120000_i64)
+        .execute(main_conn.as_mut())
+        .await?;
+
+    Ok(())
 }
 
 async fn load_applied_flyway_versions(
@@ -300,6 +427,7 @@ async fn detect_legacy_schema_baseline(
             }
         }
         SchemaTarget::Tasks => Ok(None),
+        SchemaTarget::Riir => Ok(None),
     }
 }
 
@@ -336,6 +464,7 @@ async fn repair_historyless_schema_prefix(
     let inventories = match target {
         SchemaTarget::Main => main_prefix_schema_inventories(),
         SchemaTarget::Tasks => tasks_prefix_schema_inventories(),
+        SchemaTarget::Riir => riir_prefix_schema_inventories(),
     };
 
     let Some(expected) = inventories.last() else {
@@ -396,6 +525,16 @@ fn tasks_prefix_schema_inventories() -> &'static [PrefixSchemaInventory] {
         .as_slice()
 }
 
+fn riir_prefix_schema_inventories() -> &'static [PrefixSchemaInventory] {
+    static INVENTORIES: OnceLock<Vec<PrefixSchemaInventory>> = OnceLock::new();
+    INVENTORIES
+        .get_or_init(|| {
+            serde_json::from_str(RIIR_PREFIX_SCHEMA_INVENTORIES_JSON)
+                .expect("riir prefix schema inventories JSON should parse")
+        })
+        .as_slice()
+}
+
 fn can_repair_historyless_schema_objects(
     target: SchemaTarget,
     missing_objects: &[&SchemaInventoryObject],
@@ -405,6 +544,7 @@ fn can_repair_historyless_schema_objects(
             .iter()
             .all(|object| matches!(object.object_type.as_str(), "index" | "trigger" | "view")),
         SchemaTarget::Tasks => true,
+        SchemaTarget::Riir => true,
     }
 }
 

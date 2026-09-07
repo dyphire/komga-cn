@@ -51,6 +51,7 @@ pub struct RuntimeConfig {
     pub log_file: PathBuf,
     pub database_file: PathBuf,
     pub tasks_db_file: PathBuf,
+    pub metadata_cache_db_file: PathBuf,
     pub lucene_data_directory: PathBuf,
     pub fonts_data_directory: PathBuf,
     pub oauth2_clients: Vec<OAuth2ClientConfig>,
@@ -69,6 +70,7 @@ pub struct RuntimeDatabaseSettings {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdminActionConfig {
     pub(crate) database_file: PathBuf,
+    pub(crate) metadata_cache_db_file: PathBuf,
 }
 
 impl RuntimeConfig {
@@ -142,6 +144,7 @@ impl RuntimeConfig {
             log_file: default_log_file_for_config_dir(&config_dir),
             database_file: config_dir.join("database.sqlite"),
             tasks_db_file: config_dir.join("tasks.sqlite"),
+            metadata_cache_db_file: config_dir.join("riir.sqlite"),
             lucene_data_directory: config_dir.join("lucene"),
             fonts_data_directory: config_dir.join("fonts"),
             oauth2_clients: vec![],
@@ -197,5 +200,9 @@ impl AdminActionConfig {
 
     pub fn database_file(&self) -> &Path {
         self.database_file.as_path()
+    }
+
+    pub fn metadata_cache_db_file(&self) -> &Path {
+        self.metadata_cache_db_file.as_path()
     }
 }

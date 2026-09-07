@@ -11,4 +11,6 @@ pub use pool::{
     evict_shared_pools_for_paths, file_backed_connect_options, reject_or_quarantine_pool_topology,
     shared_pool_snapshots_for_paths,
 };
-pub use schema::{bootstrap_pool, bootstrap_tasks_pool};
+pub use schema::{
+    bootstrap_pool, bootstrap_riir_pool, bootstrap_tasks_pool, migrate_book_metadata_cache_to_riir_if_orphaned,
+};

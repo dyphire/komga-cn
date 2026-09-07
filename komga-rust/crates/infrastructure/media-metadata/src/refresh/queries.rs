@@ -6,6 +6,7 @@ use sqlx::{Row, SqlitePool};
 
 use komga_infrastructure_base::resolve_library_item_path;
 use komga_infrastructure_media_core::content::persistence::public_page_number_to_persisted;
+use komga_infrastructure_base::RiirDatabase;
 
 fn persisted_page_number_to_public(number: i64) -> u64 {
     number as u64 + 1
@@ -79,9 +80,13 @@ pub(super) async fn load_book_page_row_for_refresh(
 }
 
 pub(super) async fn load_cached_comicinfo_bytes(
-    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     book_id: &str,
 ) -> anyhow::Result<CacheLookup> {
+    let pool = match riir_db {
+        Some(db) => db.read_pool(),
+        None => return Ok(CacheLookup::NotFound),
+    };
     let row = sqlx::query(
         "SELECT COMICINFO_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
     )
@@ -97,9 +102,13 @@ pub(super) async fn load_cached_comicinfo_bytes(
 }
 
 pub(super) async fn load_cached_epub_package_document(
-    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     book_id: &str,
 ) -> anyhow::Result<CacheLookup> {
+    let pool = match riir_db {
+        Some(db) => db.read_pool(),
+        None => return Ok(CacheLookup::NotFound),
+    };
     let row = sqlx::query(
         "SELECT EPUB_PACKAGE_BLOB FROM BOOK_METADATA_CACHE WHERE BOOK_ID = ? LIMIT 1",
     )

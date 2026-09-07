@@ -22,10 +22,12 @@ pub fn configure_sqlite_build(manifest_dir: &Path, out_dir: &Path) {
 
     let main_dir = manifest_dir.join("sqlx-migrations/main");
     let tasks_dir = manifest_dir.join("sqlx-migrations/tasks");
+    let riir_dir = manifest_dir.join("sqlx-migrations/riir");
     let target_root = out_dir.join("sqlx-migrations");
 
     println!("cargo:rerun-if-changed={}", main_dir.display());
     println!("cargo:rerun-if-changed={}", tasks_dir.display());
+    println!("cargo:rerun-if-changed={}", riir_dir.display());
 
     fs::create_dir_all(&target_root)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", target_root.display()));
@@ -33,6 +35,7 @@ pub fn configure_sqlite_build(manifest_dir: &Path, out_dir: &Path) {
     write_embedded_migrations_module(
         &main_dir,
         &tasks_dir,
+        &riir_dir,
         &target_root.join("embedded_migrations.rs"),
     );
     write_prefix_schema_inventories(
@@ -42,6 +45,10 @@ pub fn configure_sqlite_build(manifest_dir: &Path, out_dir: &Path) {
     write_prefix_schema_inventories(
         &tasks_dir,
         &target_root.join("tasks-prefix-schema-inventories.json"),
+    );
+    write_prefix_schema_inventories(
+        &riir_dir,
+        &target_root.join("riir-prefix-schema-inventories.json"),
     );
 }
 
@@ -211,9 +218,10 @@ fn extract_pdfium_archive(archive_bytes: &[u8], extract_dir: &Path) {
     });
 }
 
-fn write_embedded_migrations_module(main_dir: &Path, tasks_dir: &Path, target_file: &Path) {
+fn write_embedded_migrations_module(main_dir: &Path, tasks_dir: &Path, riir_dir: &Path, target_file: &Path) {
     let main_migrations = normalized_migrations(main_dir);
     let tasks_migrations = normalized_migrations(tasks_dir);
+    let riir_migrations = normalized_migrations(riir_dir);
     let mut contents = String::new();
 
     contents.push_str("pub(super) struct EmbeddedMigration {\n");
@@ -228,6 +236,12 @@ fn write_embedded_migrations_module(main_dir: &Path, tasks_dir: &Path, target_fi
         &mut contents,
         "TASKS_EMBEDDED_MIGRATIONS",
         &tasks_migrations,
+    );
+    contents.push('\n');
+    write_embedded_migration_array(
+        &mut contents,
+        "RIIR_EMBEDDED_MIGRATIONS",
+        &riir_migrations,
     );
 
     fs::write(target_file, contents)

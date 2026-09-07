@@ -4,7 +4,7 @@ use komga_application::runtime_sse::RuntimeSseEventSink;
 use sqlx::{Row, SqlitePool};
 
 use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
-use komga_infrastructure_base::resolve_stored_path;
+use komga_infrastructure_base::{resolve_stored_path, RiirDatabase};
 use komga_infrastructure_media_core::content::epub_resources::load_epub_package_document;
 
 mod artwork_refresh;
@@ -94,6 +94,7 @@ pub fn infer_transient_comicinfo_provider_metadata(
 
 pub async fn refresh_book_metadata(
     pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     runtime_events: &dyn RuntimeSseEventSink,
     book_id: &str,
     capabilities: &BTreeSet<String>,
@@ -140,7 +141,7 @@ pub async fn refresh_book_metadata(
                 && comicinfo_provider_matches_capabilities(capabilities);
             if should_read_comicinfo
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(xml) = match load_cached_comicinfo_bytes(pool, &book_id).await? {
+                && let Some(xml) = match load_cached_comicinfo_bytes(riir_db, &book_id).await? {
                     CacheLookup::Found(Some(xml)) => Some(xml),
                     CacheLookup::Found(None) => None,
                     CacheLookup::NotFound => load_comicinfo_bytes_for_media(&media)?,
@@ -176,7 +177,7 @@ pub async fn refresh_book_metadata(
             if import_epub_book
                 && epub_provider_matches_capabilities(capabilities)
                 && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && let Some(package_document) = match load_cached_epub_package_document(pool, &book_id).await? {
+                && let Some(package_document) = match load_cached_epub_package_document(riir_db, &book_id).await? {
                     CacheLookup::Found(Some(doc)) => Some(doc),
                     CacheLookup::Found(None) => None,
                     CacheLookup::NotFound => load_epub_package_document(&media).await?,
@@ -307,6 +308,7 @@ use queries::{
 
 pub async fn refresh_series_metadata(
     pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
     runtime_events: &dyn RuntimeSseEventSink,
     series_id: &str,
 ) -> anyhow::Result<()> {
@@ -354,6 +356,7 @@ pub async fn refresh_series_metadata(
 
             apply_series_metadata_from_book_imports(
                 pool,
+                riir_db,
                 runtime_events,
                 &series_id,
                 resolved_library_root.as_path(),

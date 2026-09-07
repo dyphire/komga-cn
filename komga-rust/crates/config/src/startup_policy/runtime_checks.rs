@@ -14,6 +14,7 @@ pub(crate) fn ensure_startup_runtime_layout(config: &RuntimeConfig) -> Result<()
             &config.log_file,
             &config.database_file,
             &config.tasks_db_file,
+            &config.metadata_cache_db_file,
             &config.lucene_data_directory,
             &config.fonts_data_directory,
         )?;
@@ -35,6 +36,7 @@ pub(crate) fn validate_single_writer_storage_ownership(
 
     let default_main_db = config_dir.join("database.sqlite");
     let default_tasks_db = config_dir.join("tasks.sqlite");
+    let default_metadata_cache_db = config_dir.join("riir.sqlite");
     let default_search_dir = config_dir.join("lucene");
 
     let mut mixed_targets = Vec::new();
@@ -43,6 +45,9 @@ pub(crate) fn validate_single_writer_storage_ownership(
     }
     if config.tasks_db_file == default_tasks_db {
         mixed_targets.push("tasks.sqlite");
+    }
+    if config.metadata_cache_db_file == default_metadata_cache_db {
+        mixed_targets.push("metadata-cache-db.sqlite");
     }
     if config.lucene_data_directory == default_search_dir {
         mixed_targets.push("search directory");
@@ -69,6 +74,9 @@ pub(crate) fn validate_single_writer_storage_ownership(
         if !config.tasks_db_file.starts_with(isolation_root) {
             outside_isolation.push(config.tasks_db_file.display().to_string());
         }
+        if !config.metadata_cache_db_file.starts_with(isolation_root) {
+            outside_isolation.push(config.metadata_cache_db_file.display().to_string());
+        }
         if !config.lucene_data_directory.starts_with(isolation_root) {
             outside_isolation.push(config.lucene_data_directory.display().to_string());
         }
@@ -87,6 +95,7 @@ pub(crate) fn validate_single_writer_storage_ownership(
     if is_default_home_config_dir(config_dir, env)
         && (config.database_file == default_main_db
             || config.tasks_db_file == default_tasks_db
+            || config.metadata_cache_db_file == default_metadata_cache_db
             || config.lucene_data_directory == default_search_dir)
     {
         return Err(ConfigError::MixedWriterStorageOwnership {

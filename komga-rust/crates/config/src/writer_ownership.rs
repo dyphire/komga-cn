@@ -17,6 +17,7 @@ pub struct WriterOwnershipPolicy {
 pub enum WriterKind {
     MainDatabase,
     TasksDatabase,
+    MetadataCacheDatabase,
     SearchIndex,
     FilesystemScanOutput,
     SidecarOutput,
@@ -59,6 +60,7 @@ impl RuntimeConfig {
                     match writer {
                         WriterKind::MainDatabase
                         | WriterKind::TasksDatabase
+                        | WriterKind::MetadataCacheDatabase
                         | WriterKind::SearchIndex
                         | WriterKind::FilesystemScanOutput
                         | WriterKind::SidecarOutput => WriterDecision::Blocked {
@@ -97,6 +99,7 @@ mod tests {
             for writer in [
                 WriterKind::MainDatabase,
                 WriterKind::TasksDatabase,
+                WriterKind::MetadataCacheDatabase,
                 WriterKind::SearchIndex,
                 WriterKind::FilesystemScanOutput,
                 WriterKind::SidecarOutput,
@@ -112,6 +115,7 @@ mod tests {
         for writer in [
             WriterKind::MainDatabase,
             WriterKind::TasksDatabase,
+            WriterKind::MetadataCacheDatabase,
             WriterKind::SearchIndex,
             WriterKind::FilesystemScanOutput,
             WriterKind::SidecarOutput,
@@ -126,6 +130,7 @@ mod tests {
         for writer in [
             WriterKind::MainDatabase,
             WriterKind::TasksDatabase,
+            WriterKind::MetadataCacheDatabase,
             WriterKind::SearchIndex,
             WriterKind::FilesystemScanOutput,
             WriterKind::SidecarOutput,
@@ -154,6 +159,10 @@ mod tests {
         );
         assert_eq!(
             config.writer_decision(WriterKind::TasksDatabase),
+            WriterDecision::Isolated,
+        );
+        assert_eq!(
+            config.writer_decision(WriterKind::MetadataCacheDatabase),
             WriterDecision::Isolated,
         );
         assert_eq!(

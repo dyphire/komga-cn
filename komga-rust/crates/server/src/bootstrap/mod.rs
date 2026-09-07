@@ -108,12 +108,15 @@ async fn run_admin_action(commands: admin_cli::AdminCliCommands) {
         std::process::exit(1);
     });
 
-    validate_main_startup_schema_gate(config.database_file())
-        .await
-        .unwrap_or_else(|error| {
-            eprintln!("{error}");
-            std::process::exit(1);
-        });
+    validate_main_startup_schema_gate(
+        config.database_file(),
+        config.metadata_cache_db_file(),
+    )
+    .await
+    .unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(1);
+    });
 
     admin_cli::run_admin_cli_commands(config.database_file(), &commands)
         .await
@@ -186,12 +189,19 @@ async fn run_server(startup_started_at: Instant) {
 }
 
 pub(crate) async fn validate_startup_schema_gate(config: &RuntimeConfig) -> std::io::Result<()> {
-    validate_main_startup_schema_gate(config.database_file.as_path()).await?;
+    validate_main_startup_schema_gate(
+        config.database_file.as_path(),
+        config.metadata_cache_db_file.as_path(),
+    )
+    .await?;
     validate_tasks_startup_schema_gate(config).await?;
     Ok(())
 }
 
-async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> std::io::Result<()> {
+async fn validate_main_startup_schema_gate(
+    database_file: &std::path::Path,
+    metadata_cache_db_file: &std::path::Path,
+) -> std::io::Result<()> {
     tracing::info!(
         event = "startup_schema_gate",
         database_role = "main",
@@ -210,6 +220,21 @@ async fn validate_main_startup_schema_gate(database_file: &std::path::Path) -> s
                 error,
             )
         })?;
+
+    komga_infrastructure_base::migrate_book_metadata_cache_to_riir_if_orphaned(
+        &main_pool,
+        metadata_cache_db_file,
+    )
+    .await
+    .map_err(|error| {
+        schema_gate_failure(
+            "main",
+            database_file,
+            "failed to migrate book metadata cache to riir database",
+            error,
+        )
+    })?;
+
     bootstrap_pool(&main_pool).await.map_err(|error| {
         schema_gate_failure(
             "main",
