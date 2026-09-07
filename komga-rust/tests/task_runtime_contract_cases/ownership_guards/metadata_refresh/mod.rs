@@ -1,5 +1,6 @@
 use super::*;
 
+mod analysis_handoff;
 mod provider_formats;
 
 pub(super) use provider_formats::{

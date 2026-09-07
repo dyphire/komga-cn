@@ -1,12 +1,17 @@
+use std::collections::BTreeSet;
+
 use crate::JobRuntime;
 use komga_application::task_processing::{RefreshBookMetadataPayload, TaskKind, TaskRequest};
 use komga_application::task_processing::{TaskExecutionOutcome, TaskProcessingError};
 use komga_domain::discovery::MediaStatus;
-use komga_infrastructure_media_library::analysis::analyze_book;
+use komga_infrastructure_media_library::analysis::{BookAnalysisPurpose, analyze_book};
 use komga_infrastructure_media_library::maintenance::persistence::{
     load_books_with_undersized_generated_thumbnails, load_non_deleted_book_ids,
 };
 use komga_infrastructure_search::SearchEntityType;
+use tracing::warn;
+
+use super::metadata::{run_refresh_book_metadata, series_metadata_follow_up};
 
 pub(super) async fn upsert_book_search(
     runtime: &JobRuntime<'_>,
@@ -26,15 +31,43 @@ pub(crate) async fn execute_analyze_book(
     priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
     let book_id = book_id.to_string();
-    let outcome = analyze_book(runtime.media_library(), &book_id).await?;
+    let outcome = analyze_book(
+        runtime.media_library(),
+        &book_id,
+        BookAnalysisPurpose::AnalysisAndMetadata,
+    )
+    .await?;
     upsert_book_search(runtime, &book_id).await?;
 
     if outcome.media_status == Some(MediaStatus::Ready) && !outcome.series_id.is_empty() {
         let follow_up_priority = priority.saturating_add(1);
-        return Ok(TaskExecutionOutcome::with_follow_up_tasks(vec![
-            TaskRequest::new(TaskKind::GenerateBookThumbnail)
-                .priority(follow_up_priority)
-                .into_queue_record_with_id(&book_id),
+        let thumbnail_task = TaskRequest::new(TaskKind::GenerateBookThumbnail)
+            .priority(follow_up_priority)
+            .into_queue_record_with_id(&book_id);
+        let capabilities = RefreshBookMetadataPayload::default_capabilities()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if runtime.filesystem().owns_sidecar_output() {
+            match run_refresh_book_metadata(
+                runtime,
+                &book_id,
+                &capabilities,
+                Some(&outcome.metadata_sources),
+            )
+            .await
+            {
+                Ok(series_id) => {
+                    let mut tasks =
+                        series_metadata_follow_up(series_id, follow_up_priority).follow_up_tasks();
+                    tasks.insert(0, thumbnail_task);
+                    return Ok(TaskExecutionOutcome::with_follow_up_tasks(tasks));
+                }
+                Err(error) => warn!(book_id = %book_id, error = %error,
+                    "book metadata refresh after analysis failed; scheduling standalone refresh"),
+            }
+        }
+        let follow_up_tasks = vec![
+            thumbnail_task,
             TaskRequest::with_payload(
                 TaskKind::RefreshBookMetadata,
                 RefreshBookMetadataPayload::new(book_id.clone()),
@@ -42,7 +75,8 @@ pub(crate) async fn execute_analyze_book(
             .priority(follow_up_priority)
             .group(outcome.series_id)
             .into_queue_record(),
-        ]));
+        ];
+        return Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks));
     }
 
     Ok(TaskExecutionOutcome::completed())
@@ -144,14 +178,6 @@ mod tests {
 
     #[derive(Debug, PartialEq, Eq)]
     struct QueuedThumbnailTask {
-        id: String,
-        simple_type: String,
-        priority: i32,
-        group: Option<String>,
-    }
-
-    #[derive(Debug, PartialEq, Eq)]
-    struct QueuedFollowUpTask {
         id: String,
         simple_type: String,
         priority: i32,
@@ -760,107 +786,6 @@ mod tests {
         cleanup_riir_database(&runtime, &database_file).await;
         let _ = std::fs::remove_file(database_file);
         let _ = std::fs::remove_dir_all(library_root);
-    }
-
-    #[tokio::test]
-    async fn analyze_book_enqueues_follow_ups_without_touching_book_last_modified() {
-        let fixture = seed_analyze_book_dimension_fixture("analyze-book-follow-up", true).await;
-        let runtime = fixture.runtime_context(false, false).await;
-        let scheduler =
-            TaskQueueScheduler::for_runtime(runtime.clone(), "analyze-book-follow-up-test").await;
-        let task = TaskRequest::with_payload(TaskKind::AnalyzeBook, BookPayload::new("book-1"))
-            .priority(90)
-            .group("series-1")
-            .into_queue_record();
-
-        let expected_last_modified = "2000-01-01 00:00:00";
-        let pool_before = connect_test_pool(fixture.database_file.as_path(), 1)
-            .await
-            .expect("analyze-book follow-up precondition db should open");
-        sqlx::query("UPDATE BOOK SET LAST_MODIFIED_DATE = ? WHERE ID = ?")
-            .bind(expected_last_modified)
-            .bind("book-1")
-            .execute(&pool_before)
-            .await
-            .expect("analyze-book follow-up book timestamp should be pinned");
-        pool_before.close().await;
-
-        let result = execute_and_enqueue(&scheduler, &runtime, &task).await;
-        assert!(matches!(result, Some(Ok(()))));
-
-        let verify_pool = connect_test_pool(fixture.database_file.as_path(), 1)
-            .await
-            .expect("analyze-book follow-up verify db should open");
-        let media_row =
-            sqlx::query("SELECT STATUS, PAGE_COUNT FROM MEDIA WHERE BOOK_ID = ? LIMIT 1")
-                .bind("book-1")
-                .fetch_one(&verify_pool)
-                .await
-                .expect("analyze-book follow-up media row should be queryable");
-        let book_row = sqlx::query("SELECT LAST_MODIFIED_DATE FROM BOOK WHERE ID = ? LIMIT 1")
-            .bind("book-1")
-            .fetch_one(&verify_pool)
-            .await
-            .expect("analyze-book follow-up book row should be queryable");
-        verify_pool.close().await;
-        assert_eq!(media_row.get::<String, _>("STATUS"), "READY");
-        assert!(media_row.get::<i64, _>("PAGE_COUNT") > 0);
-        assert_eq!(
-            load_persisted_page_dimensions(fixture.database_file.as_path(), "book-1").await,
-            vec![
-                PersistedPageDimensions {
-                    number: 0,
-                    width: Some(48),
-                    height: Some(96),
-                },
-                PersistedPageDimensions {
-                    number: 1,
-                    width: Some(120),
-                    height: Some(80),
-                },
-            ],
-            "analyze-book should persist page dimensions when library ANALYZE_DIMENSIONS is enabled",
-        );
-        assert_eq!(
-            book_row.get::<String, _>("LAST_MODIFIED_DATE"),
-            expected_last_modified,
-            "ready analyze-book should not refresh BOOK last-modified",
-        );
-
-        let mut queued = Vec::new();
-        while let Some(task) = scheduler
-            .take_available_for_test("analyze-book-follow-up-assert")
-            .await
-        {
-            queued.push(QueuedFollowUpTask {
-                id: task.id,
-                simple_type: task.simple_type,
-                priority: task.priority,
-                group: task.group,
-            });
-        }
-        queued.sort_by(|left, right| left.id.cmp(&right.id));
-
-        assert_eq!(
-            queued,
-            vec![
-                QueuedFollowUpTask {
-                    id: "GenerateBookThumbnail_book-1".to_string(),
-                    simple_type: "GenerateBookThumbnail".to_string(),
-                    priority: 91,
-                    group: None,
-                },
-                QueuedFollowUpTask {
-                    id: "RefreshBookMetadata_book-1".to_string(),
-                    simple_type: "RefreshBookMetadata".to_string(),
-                    priority: 91,
-                    group: Some("series-1".to_string()),
-                },
-            ],
-            "ready analyze-book must enqueue Kotlin-style thumbnail and metadata follow-up tasks",
-        );
-
-        fixture.cleanup().await;
     }
 
     #[tokio::test]

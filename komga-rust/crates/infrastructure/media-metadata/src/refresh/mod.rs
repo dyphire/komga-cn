@@ -10,6 +10,9 @@ use sqlx::{Row, SqlitePool};
 use crate::{load_comicinfo_bytes_for_media, parse_comicinfo_xml};
 use komga_infrastructure_base::{RiirDatabase, resolve_stored_path};
 use komga_infrastructure_media_core::content::epub_resources::load_epub_package_document;
+use komga_infrastructure_media_core::content::metadata_sources::{
+    CapturedMetadataDocument, CapturedMetadataSources,
+};
 
 mod artwork_refresh;
 mod artwork_support;
@@ -41,6 +44,22 @@ use series_metadata_contribution::{
 use sources::{
     extract_comicinfo_book_patch, extract_comicinfo_readlists, extract_comicinfo_series_patch,
 };
+
+fn supplied_document<'a>(
+    source: &'a CapturedMetadataDocument,
+    name: &str,
+) -> anyhow::Result<Option<&'a [u8]>> {
+    match source {
+        CapturedMetadataDocument::Present(bytes) => Ok(Some(bytes)),
+        CapturedMetadataDocument::Absent => Ok(None),
+        CapturedMetadataDocument::NotRequested | CapturedMetadataDocument::NotApplicable => {
+            anyhow::bail!("{name} is required but was not captured during analysis")
+        }
+        CapturedMetadataDocument::Failed(error) => {
+            anyhow::bail!("{name} capture failed during analysis: {error}")
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RefreshBookMetadataOutcome {
@@ -109,6 +128,36 @@ pub async fn refresh_book_metadata(
     book_id: &str,
     capabilities: &BTreeSet<String>,
 ) -> anyhow::Result<RefreshBookMetadataOutcome> {
+    refresh_book_metadata_internal(pool, riir_db, runtime_events, book_id, capabilities, None).await
+}
+
+pub async fn refresh_book_metadata_with_sources(
+    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    capabilities: &BTreeSet<String>,
+    sources: &CapturedMetadataSources,
+) -> anyhow::Result<RefreshBookMetadataOutcome> {
+    refresh_book_metadata_internal(
+        pool,
+        riir_db,
+        runtime_events,
+        book_id,
+        capabilities,
+        Some(sources),
+    )
+    .await
+}
+
+async fn refresh_book_metadata_internal(
+    pool: &SqlitePool,
+    riir_db: Option<&RiirDatabase>,
+    runtime_events: &dyn RuntimeSseEventSink,
+    book_id: &str,
+    capabilities: &BTreeSet<String>,
+    supplied_sources: Option<&CapturedMetadataSources>,
+) -> anyhow::Result<RefreshBookMetadataOutcome> {
     let book_id = book_id.to_string();
     let book_id_for_events = book_id.clone();
     let outcome = {
@@ -164,20 +213,51 @@ pub async fn refresh_book_metadata(
             let should_read_comicinfo =
                 (import_comicinfo_book || import_comicinfo_readlist || should_persist_comicinfo)
                     && comicinfo_provider_matches_capabilities(capabilities);
-            if should_read_comicinfo
-                && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && (book_media_is_zip_archive(&media) || book_media_is_rar_archive(&media))
-            {
-                let document = load_comicinfo_bytes_for_media(&media)?
-                    .as_deref()
-                    .map(parse_comicinfo_xml)
-                    .transpose()
-                    .map_err(|error| {
-                        anyhow::anyhow!(error).context(format!(
-                            "failed to parse ComicInfo.xml from '{}': ",
-                            media.file_path.display()
-                        ))
-                    })?;
+            let should_read_epub = (import_epub_book || import_epub_series)
+                && epub_provider_matches_capabilities(capabilities);
+            let media = if should_read_comicinfo || should_read_epub {
+                load_book_media_for_refresh(pool, &book_id).await?
+            } else {
+                None
+            };
+            let comicinfo_media = media.as_ref().filter(|media| {
+                should_read_comicinfo
+                    && (book_media_is_zip_archive(media) || book_media_is_rar_archive(media))
+            });
+            let epub_media = media
+                .as_ref()
+                .filter(|media| should_read_epub && book_media_is_epub(media));
+            // Validate both handoff sources before either provider writes metadata.
+            if let Some(sources) = supplied_sources {
+                if comicinfo_media.is_some() {
+                    supplied_document(&sources.comicinfo, "ComicInfo.xml")?;
+                }
+                if epub_media.is_some() {
+                    supplied_document(&sources.epub, "EPUB package document")?;
+                }
+            }
+            if let Some(media) = comicinfo_media {
+                let document = match supplied_sources {
+                    Some(sources) => supplied_document(&sources.comicinfo, "ComicInfo.xml")?
+                        .map(parse_comicinfo_xml)
+                        .transpose()
+                        .map_err(|error| {
+                            anyhow::anyhow!(error).context(format!(
+                                "failed to use supplied ComicInfo.xml for '{}': ",
+                                media.file_path.display()
+                            ))
+                        })?,
+                    None => load_comicinfo_bytes_for_media(media)?
+                        .as_deref()
+                        .map(parse_comicinfo_xml)
+                        .transpose()
+                        .map_err(|error| {
+                            anyhow::anyhow!(error).context(format!(
+                                "failed to parse ComicInfo.xml from '{}': ",
+                                media.file_path.display()
+                            ))
+                        })?,
+                };
 
                 if should_persist_comicinfo
                     && book_row.get::<Option<String>, _>("MEDIA_STATUS").as_deref() == Some("READY")
@@ -234,12 +314,14 @@ pub async fn refresh_book_metadata(
                 }
             }
 
-            if (import_epub_book || import_epub_series)
-                && epub_provider_matches_capabilities(capabilities)
-                && let Some(media) = load_book_media_for_refresh(pool, &book_id).await?
-                && book_media_is_epub(&media)
-            {
-                let package_document = load_epub_package_document(&media).await?;
+            if let Some(media) = epub_media {
+                let package_document = match supplied_sources {
+                    Some(sources) => supplied_document(&sources.epub, "EPUB package document")?
+                        .map(std::borrow::Cow::Borrowed),
+                    None => load_epub_package_document(media)
+                        .await?
+                        .map(std::borrow::Cow::Owned),
+                };
 
                 if import_epub_series
                     && book_row.get::<Option<String>, _>("MEDIA_STATUS").as_deref() == Some("READY")
