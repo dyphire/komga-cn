@@ -1,12 +1,13 @@
+use anyhow::Context;
 use komga_application::media_assets::{
     BookMediaRecord, book_media_is_rar_archive, book_media_is_zip_archive,
     content_type_from_filename,
 };
+use komga_infrastructure_media_core::content::metadata_sources::read_comicinfo_from_zip_archive;
 use quick_xml::Reader as XmlReader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesCData, BytesRef, BytesText, Event as XmlEvent};
 use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 use zip::ZipArchive;
 
@@ -318,69 +319,8 @@ fn load_comicinfo_bytes_from_zip(path: &Path) -> anyhow::Result<Option<Vec<u8>>>
         ))
     })?;
 
-    let mut fallback_index = None;
-    for index in 0..archive.len() {
-        let entry = archive.by_index(index).map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to inspect ComicInfo archive entry {index} from '{}': ",
-                path.display()
-            ))
-        })?;
-        if entry.is_dir() {
-            continue;
-        }
-        let entry_name = entry
-            .name()
-            .map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to decode ComicInfo archive entry name at index {index} from '{}': ",
-                    path.display()
-                ))
-            })?
-            .replace('\\', "/");
-        if entry_name == COMICINFO_FILE_NAME {
-            drop(entry);
-            return read_zip_entry_at_index(&mut archive, index, path).map(Some);
-        }
-        if fallback_index.is_none() && is_nested_comicinfo_entry(&entry_name) {
-            fallback_index = Some(index);
-        }
-    }
-
-    fallback_index
-        .map(|index| read_zip_entry_at_index(&mut archive, index, path))
-        .transpose()
-}
-
-fn read_zip_entry_at_index(
-    archive: &mut ZipArchive<File>,
-    index: usize,
-    path: &Path,
-) -> anyhow::Result<Vec<u8>> {
-    let mut entry = archive.by_index(index).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to open ComicInfo archive entry at index {index} from '{}': ",
-            path.display()
-        ))
-    })?;
-    let entry_name = entry
-        .name()
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to decode ComicInfo archive entry name at index {index} from '{}': ",
-                path.display()
-            ))
-        })?
-        .to_string();
-    let mut bytes = Vec::new();
-    entry.read_to_end(&mut bytes).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to read ComicInfo archive entry '{}' bytes from '{}': ",
-            entry_name,
-            path.display()
-        ))
-    })?;
-    Ok(bytes)
+    read_comicinfo_from_zip_archive(&mut archive)
+        .with_context(|| format!("read ComicInfo archive '{}'", path.display()))
 }
 
 fn load_comicinfo_bytes_from_rar(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
@@ -466,6 +406,10 @@ mod tests {
     #[test]
     fn loads_root_comicinfo_before_nested_entries() {
         let path = unique_temp_path("komga-comicinfo-root-priority", "cbz");
+        let root_xml = format!(
+            "<ComicInfo><Summary>{}</Summary><Title>root</Title></ComicInfo>",
+            "x".repeat(32 * 1024)
+        );
         write_zip_fixture(
             &path,
             &[
@@ -473,10 +417,7 @@ mod tests {
                     "nested/ComicInfo.xml",
                     br#"<ComicInfo><Title>nested</Title></ComicInfo>"#,
                 ),
-                (
-                    "ComicInfo.xml",
-                    br#"<ComicInfo><Title>root</Title></ComicInfo>"#,
-                ),
+                ("ComicInfo.xml", root_xml.as_bytes()),
             ],
         );
 
@@ -497,7 +438,7 @@ mod tests {
             &path,
             &[
                 (
-                    "first/ComicInfo.xml",
+                    "first\\ComicInfo.xml",
                     br#"<ComicInfo><Title>first</Title></ComicInfo>"#,
                 ),
                 (

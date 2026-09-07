@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 
+use komga_infrastructure_media_core::content::metadata_sources::CapturedMetadataSources;
 use komga_infrastructure_media_metadata::{
     aggregate_series_metadata, generate_book_thumbnail, refresh_book_local_artwork,
-    refresh_book_metadata, refresh_series_local_artwork, refresh_series_metadata,
+    refresh_book_metadata, refresh_book_metadata_with_sources, refresh_series_local_artwork,
+    refresh_series_metadata,
 };
 
 use komga_application::task_processing::{
@@ -17,20 +19,28 @@ pub(crate) async fn execute_refresh_book_metadata(
     capabilities: &BTreeSet<String>,
     priority: i32,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    let series_id = run_refresh_book_metadata(runtime, book_id, capabilities).await?;
-    let follow_up_tasks = series_id
-        .into_iter()
-        .map(|series_id| {
-            TaskRequest::with_payload(
-                TaskKind::RefreshSeriesMetadata,
-                SeriesPayload::new(series_id.clone()),
-            )
-            .priority(priority - 1)
-            .group(series_id)
-            .into_queue_record()
-        })
-        .collect();
-    Ok(TaskExecutionOutcome::with_follow_up_tasks(follow_up_tasks))
+    let series_id = run_refresh_book_metadata(runtime, book_id, capabilities, None).await?;
+    Ok(series_metadata_follow_up(series_id, priority))
+}
+
+pub(super) fn series_metadata_follow_up(
+    series_id: Option<String>,
+    priority: i32,
+) -> TaskExecutionOutcome {
+    TaskExecutionOutcome::with_follow_up_tasks(
+        series_id
+            .into_iter()
+            .map(|series_id| {
+                TaskRequest::with_payload(
+                    TaskKind::RefreshSeriesMetadata,
+                    SeriesPayload::new(series_id.clone()),
+                )
+                .priority(priority.saturating_sub(1))
+                .group(series_id)
+                .into_queue_record()
+            })
+            .collect(),
+    )
 }
 
 pub(crate) async fn execute_refresh_series_metadata(
@@ -86,23 +96,40 @@ pub(crate) async fn execute_refresh_series_local_artwork(
         .map(|()| TaskExecutionOutcome::completed())
 }
 
-async fn run_refresh_book_metadata(
+pub(super) async fn run_refresh_book_metadata(
     runtime: &JobRuntime<'_>,
     book_id: &str,
     capabilities: &BTreeSet<String>,
+    sources: Option<&CapturedMetadataSources>,
 ) -> Result<Option<String>, TaskProcessingError> {
     if !runtime.filesystem().owns_sidecar_output() {
         return Ok(None);
     }
 
-    let outcome = refresh_book_metadata(
-        runtime.database().task_write_pool(),
-        Some(runtime.riir_db().map_err(TaskProcessingError::runtime)?),
-        runtime.runtime_events(),
-        book_id,
-        capabilities,
-    )
-    .await
+    let riir_db = Some(runtime.riir_db().map_err(TaskProcessingError::runtime)?);
+    let outcome = match sources {
+        Some(sources) => {
+            refresh_book_metadata_with_sources(
+                runtime.database().task_write_pool(),
+                riir_db,
+                runtime.runtime_events(),
+                book_id,
+                capabilities,
+                sources,
+            )
+            .await
+        }
+        None => {
+            refresh_book_metadata(
+                runtime.database().task_write_pool(),
+                riir_db,
+                runtime.runtime_events(),
+                book_id,
+                capabilities,
+            )
+            .await
+        }
+    }
     .map_err(TaskProcessingError::runtime)?;
 
     let search = runtime.search_engine();

@@ -66,6 +66,7 @@ pub struct EpubAnalysis {
     pub media_files: Vec<EpubAnalysisFile>,
     pub extension_blob: Vec<u8>,
     pub comment: Option<String>,
+    pub package_document: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -81,11 +82,18 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     let mut archive = ZipArchive::new(file)
         .map_err(|error| EpubAnalysisError::new(format!("open EPUB archive: {error}")))?;
 
-    let container = read_entry(&mut archive, "META-INF/container.xml")?
+    analyze_epub_archive(&mut archive, false)
+}
+
+pub fn analyze_epub_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    retain_package_document: bool,
+) -> Result<EpubAnalysis, EpubAnalysisError> {
+    let container = read_entry(archive, "META-INF/container.xml")?
         .ok_or_else(|| EpubAnalysisError::new("EPUB is missing META-INF/container.xml"))?;
     let rootfile_path = parse_rootfile(&container)?
         .ok_or_else(|| EpubAnalysisError::new("EPUB container has no rootfile"))?;
-    let package = read_entry(&mut archive, &rootfile_path)?
+    let package = read_entry(archive, &rootfile_path)?
         .ok_or_else(|| EpubAnalysisError::new("EPUB package document is missing"))?;
     let manifest = parse_manifest(&package, &rootfile_path)?;
     let spine_ids = parse_epub_spine_itemrefs(&package).map_err(parse_error("parse EPUB spine"))?;
@@ -94,7 +102,7 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
         .filter_map(|id| manifest.get(id).cloned())
         .collect::<Vec<_>>();
     let spine_id_set = spine_ids.into_iter().collect::<HashSet<_>>();
-    let entries = collect_entries(&mut archive)?;
+    let entries = collect_entries(archive)?;
 
     let mut media_files = Vec::new();
     for item in &spine {
@@ -110,8 +118,8 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
     }
 
     let mut errors = Vec::new();
-    let is_kepub = is_kepub(&mut archive, &spine);
-    let navigation = navigation(&mut archive, &package, &rootfile_path, &manifest);
+    let is_kepub = is_kepub(archive, &spine);
+    let navigation = navigation(archive, &package, &rootfile_path, &manifest);
     let toc = match navigation.toc {
         Ok(toc) => toc,
         Err(_) => {
@@ -133,7 +141,7 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
             Vec::new()
         }
     };
-    let pages = match divina_pages(&mut archive, &manifest, &spine, &entries) {
+    let pages = match divina_pages(archive, &manifest, &spine, &entries) {
         Ok(pages) => pages,
         Err(_) => {
             errors.push("ERR_1038");
@@ -154,7 +162,7 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
             .sum()
     };
     let positions = match positions(
-        &mut archive,
+        archive,
         &spine,
         &media_files,
         &entries,
@@ -196,6 +204,7 @@ pub fn analyze_epub_file(path: &Path) -> Result<EpubAnalysis, EpubAnalysisError>
         media_files,
         extension_blob,
         comment,
+        package_document: retain_package_document.then_some(package),
     })
 }
 

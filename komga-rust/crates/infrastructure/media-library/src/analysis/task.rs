@@ -3,27 +3,37 @@ use super::persistence::{
     persist_book_analysis,
 };
 use crate::MediaLibraryJobContext;
-use crate::analysis::analyze_book_media_file;
+use crate::analysis::analyze_book_media_file_with_sources;
 use crate::maintenance::updates::adjust_analyzed_book_read_progress;
 use komga_application::task_processing::TaskProcessingError;
 use komga_domain::discovery::MediaStatus;
 use komga_infrastructure_base::resolve_library_item_path;
+use komga_infrastructure_media_core::content::metadata_sources::CapturedMetadataSources;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnalyzeBookOutcome {
     pub series_id: String,
     pub media_status: Option<MediaStatus>,
+    pub metadata_sources: CapturedMetadataSources,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BookAnalysisPurpose {
+    AnalysisOnly,
+    AnalysisAndMetadata,
 }
 
 pub async fn analyze_book(
     runtime: &MediaLibraryJobContext,
     book_id: &str,
+    purpose: BookAnalysisPurpose,
 ) -> Result<AnalyzeBookOutcome, TaskProcessingError> {
     let book_id = book_id.to_string();
     if !runtime.database().owns_main_database() {
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
             media_status: None,
+            metadata_sources: CapturedMetadataSources::default(),
         });
     }
 
@@ -34,17 +44,26 @@ pub async fn analyze_book(
         return Ok(AnalyzeBookOutcome {
             series_id: String::new(),
             media_status: None,
+            metadata_sources: CapturedMetadataSources::default(),
         });
     };
 
     let file_path = resolve_library_item_path(&input.root, &input.url);
-    let analysis =
-        analyze_book_media_file(&file_path, input.analyze_dimensions).map_err(|error| {
-            TaskProcessingError::runtime(format!(
-                "failed to analyze media file for '{book_id}' ('{}'): {error}",
-                file_path.display(),
-            ))
-        })?;
+    let metadata_sources = match purpose {
+        BookAnalysisPurpose::AnalysisOnly => Default::default(),
+        BookAnalysisPurpose::AnalysisAndMetadata => input.metadata_sources,
+    };
+    let analysis = analyze_book_media_file_with_sources(
+        &file_path,
+        input.analyze_dimensions,
+        metadata_sources,
+    )
+    .map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "failed to analyze media file for '{book_id}' ('{}'): {error}",
+            file_path.display(),
+        ))
+    })?;
 
     let persisted = AnalyzedBookMedia {
         status: analysis.status,
@@ -96,5 +115,6 @@ pub async fn analyze_book(
     Ok(AnalyzeBookOutcome {
         series_id: input.series_id,
         media_status: Some(persisted.status),
+        metadata_sources: analysis.metadata_sources,
     })
 }
