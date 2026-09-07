@@ -144,7 +144,12 @@ pub async fn remove_hashed_pages(
     .await
     .map_err(TaskProcessingError::runtime)?;
 
-    crate::analysis::analyze_book(runtime, analyze_book_id.as_str()).await?;
+    crate::analysis::analyze_book(
+        runtime,
+        analyze_book_id.as_str(),
+        crate::analysis::BookAnalysisPurpose::AnalysisOnly,
+    )
+    .await?;
 
     persist_duplicate_page_deleted_events(
         runtime.database().write_pool(),

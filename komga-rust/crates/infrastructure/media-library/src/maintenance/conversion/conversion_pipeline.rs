@@ -236,7 +236,12 @@ pub async fn convert_book(
         .await
         .map_err(TaskProcessingError::runtime)?;
 
-    crate::analysis::analyze_book(runtime, &book_id).await?;
+    crate::analysis::analyze_book(
+        runtime,
+        &book_id,
+        crate::analysis::BookAnalysisPurpose::AnalysisOnly,
+    )
+    .await?;
 
     let analyzed_pages = load_book_hashed_pages(runtime.database().read_pool(), &book_id)
         .await

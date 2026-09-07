@@ -22,7 +22,7 @@ pub use refresh::{
     RiirSeriesMetadataContributionCleanup, TransientMetadataProviderInference,
     aggregate_series_metadata, infer_transient_comicinfo_provider_metadata,
     infer_transient_epub_provider_metadata, refresh_book_local_artwork, refresh_book_metadata,
-    refresh_series_local_artwork, refresh_series_metadata,
+    refresh_book_metadata_with_sources, refresh_series_local_artwork, refresh_series_metadata,
 };
 pub use thumbnail_writer::ThumbnailWriter;
 pub use thumbnails::{
