@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use config::Config as LayeredConfig;
 
 use super::super::cli_args::{
-    CONFIG_DIR_ENV, MODE_ENV, PLATFORM_PROFILE_ENV, RUNTIME_PROFILE_ENV, RuntimeCli,
+    CONFIG_DIR_ENV, MODE_ENV, PLATFORM_PROFILE_ENV, RUNTIME_PROFILE_ENV, RuntimeCli, SORT_LOCALE_ENV,
     SPRING_PROFILES_ACTIVE_ENV,
 };
 use super::super::env_config::{
@@ -139,6 +139,36 @@ fn resolve_session_max_inactive_seconds(
         .unwrap_or(DEFAULT_SESSION_MAX_INACTIVE_SECONDS)
 }
 
+fn resolve_sort_locale(
+    layered: &LayeredConfig,
+    env: &BTreeMap<String, String>,
+) -> Option<String> {
+    env.get(SORT_LOCALE_ENV)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            [
+                "komga.sortLocale",
+                "komga.sort-locale",
+                "komga.sort_locale",
+            ]
+            .iter()
+            .find_map(|key| {
+                layered
+                    .get_string(key)
+                    .ok()
+                    .and_then(|value| {
+                        let trimmed = value.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        }
+                    })
+            })
+        })
+}
+
 struct ResolvedConfigInputs {
     layered: LayeredConfig,
     resolved_config_dir: PathBuf,
@@ -252,6 +282,7 @@ pub(crate) fn resolve_with_env(
     let oauth2_account_creation = resolve_oauth2_account_creation(&layered, env)?;
     let oidc_email_verification = resolve_oidc_email_verification(&layered, env)?;
     let session_max_inactive_seconds = resolve_session_max_inactive_seconds(&layered, env);
+    let sort_locale = resolve_sort_locale(&layered, env);
 
     let writer_ownership_policy = resolve_writer_ownership_policy_for_startup_slice(cli, env)?;
     let demo_mode = active_profiles_contain_demo(&layered, env);
@@ -280,6 +311,7 @@ pub(crate) fn resolve_with_env(
         writer_ownership_policy,
         session_max_inactive_seconds,
         task_pool_size: 1,
+        sort_locale,
     };
 
     config.validate_single_writer_storage_ownership(env)?;
@@ -396,5 +428,41 @@ mod tests {
             assert!(error.to_string().contains(expected_setting));
             assert!(!riir_path.exists(), "validation must not open the database");
         }
+    }
+
+    #[test]
+    fn sort_locale_falls_through_empty_first_alias() {
+        let config_dir = TempConfigDir::new("sort-locale-empty-first");
+        fs::write(
+            config_dir.0.join("application.yml"),
+            "komga:\n  sortLocale: \"\"\n  sort-locale: fr-FR\n",
+        )
+        .expect("application config should be written");
+
+        let cli = RuntimeCli {
+            config_dir: Some(config_dir.0.clone()),
+            ..RuntimeCli::default()
+        };
+        let config = resolve_with_env(&cli, &BTreeMap::new())
+            .expect("runtime config should resolve");
+        assert_eq!(config.sort_locale, Some("fr-FR".to_string()));
+    }
+
+    #[test]
+    fn sort_locale_returns_none_when_all_aliases_empty() {
+        let config_dir = TempConfigDir::new("sort-locale-all-empty");
+        fs::write(
+            config_dir.0.join("application.yml"),
+            "komga:\n  sortLocale: \"   \"\n  sort-locale: \"\"\n  sort_locale: \"\"\n",
+        )
+        .expect("application config should be written");
+
+        let cli = RuntimeCli {
+            config_dir: Some(config_dir.0.clone()),
+            ..RuntimeCli::default()
+        };
+        let config = resolve_with_env(&cli, &BTreeMap::new())
+            .expect("runtime config should resolve");
+        assert_eq!(config.sort_locale, None);
     }
 }

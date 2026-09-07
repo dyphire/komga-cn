@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use komga_domain::discovery::compare_book_names;
+
 use super::models::{SeriesEvaluationContext, SeriesRow, SeriesSortMode};
 
 pub(super) fn sort_series(
@@ -25,22 +27,10 @@ pub(super) fn sort_series(
     series.sort_by(|left, right| {
         for sort_mode in sort_modes {
             let ordering = match sort_mode {
-                SeriesSortMode::TitleAsc => left
-                    .title_sort
-                    .to_ascii_lowercase()
-                    .cmp(&right.title_sort.to_ascii_lowercase()),
-                SeriesSortMode::TitleDesc => right
-                    .title_sort
-                    .to_ascii_lowercase()
-                    .cmp(&left.title_sort.to_ascii_lowercase()),
-                SeriesSortMode::NameAsc => left
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&right.name.to_ascii_lowercase()),
-                SeriesSortMode::NameDesc => right
-                    .name
-                    .to_ascii_lowercase()
-                    .cmp(&left.name.to_ascii_lowercase()),
+                SeriesSortMode::TitleAsc => compare_book_names(&left.title_sort, &right.title_sort),
+                SeriesSortMode::TitleDesc => compare_book_names(&right.title_sort, &left.title_sort),
+                SeriesSortMode::NameAsc => compare_book_names(&left.name, &right.name),
+                SeriesSortMode::NameDesc => compare_book_names(&right.name, &left.name),
                 SeriesSortMode::ReadDateAsc => {
                     let left_date = eval_ctx.read_dates.as_ref().and_then(|d| d.get(&left.id));
                     let right_date = eval_ctx.read_dates.as_ref().and_then(|d| d.get(&right.id));

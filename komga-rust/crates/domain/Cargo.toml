@@ -5,4 +5,5 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+icu.workspace = true
 unicode-normalization.workspace = true

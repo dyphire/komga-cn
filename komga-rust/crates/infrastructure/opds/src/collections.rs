@@ -1,16 +1,12 @@
 use std::collections::HashSet;
 
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 use sqlx::{Row, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use komga_application::opds::{
     PersistedBookFeedRecord, PersistedNamedRecord, PersistedSeriesRecord,
 };
+use komga_domain::discovery::compare_book_names;
 
 use super::records::{parsed_age_rating, parsed_sharing_labels};
 
@@ -59,13 +55,6 @@ pub(super) fn unicode_collation_sort_key(value: &str) -> String {
         .collect()
 }
 
-fn tertiary_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for OPDS collection sorting should construct")
-}
-
 pub(super) async fn load_collections(
     pool: &SqlitePool,
     library_id: Option<&str>,
@@ -103,9 +92,8 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         })
         .collect::<Vec<_>>();
 
-    let collator = tertiary_unicode_collator();
     records.sort_by(|left, right| {
-        let ordering = collator.compare(left.name.as_str(), right.name.as_str());
+        let ordering = compare_book_names(left.name.as_str(), right.name.as_str());
         if ordering.is_eq() {
             left.id.cmp(&right.id)
         } else {
