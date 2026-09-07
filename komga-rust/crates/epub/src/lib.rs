@@ -6,7 +6,8 @@ mod parse;
 pub const EPUB_MEDIA_TYPE: &str = "application/epub+zip";
 
 pub use analysis::{
-    EpubAnalysis, EpubAnalysisError, EpubAnalysisFile, EpubAnalysisPage, analyze_epub_file,
+    EpubAnalysis, EpubAnalysisError, EpubAnalysisFile, EpubAnalysisPage, analyze_epub_archive,
+    analyze_epub_file,
 };
 pub use mobi::{
     ADAPTER_VERSION, MOBI_MEDIA_TYPE, MobiError, MobiUnsupportedReason, NormalizedPublication,

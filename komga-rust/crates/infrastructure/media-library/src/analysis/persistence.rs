@@ -1,5 +1,6 @@
 use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
+use komga_infrastructure_media_core::content::metadata_sources::MetadataSourceRequest;
 use sqlx::SqlitePool;
 
 #[derive(Clone, Debug)]
@@ -10,6 +11,7 @@ pub(super) struct BookAnalysisInput {
     pub(super) series_id: String,
     pub(super) previous_media_status: Option<MediaStatus>,
     pub(super) previous_page_count: i64,
+    pub(super) metadata_sources: MetadataSourceRequest,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +53,12 @@ pub(super) async fn analyze_book_input(
              b.URL AS URL,
              b.SERIES_ID AS SERIES_ID,
              l.ANALYZE_DIMENSIONS AS ANALYZE_DIMENSIONS,
+             l.IMPORT_COMICINFO_BOOK AS IMPORT_COMICINFO_BOOK,
+             l.IMPORT_COMICINFO_READLIST AS IMPORT_COMICINFO_READLIST,
+             l.IMPORT_COMICINFO_SERIES AS IMPORT_COMICINFO_SERIES,
+             l.IMPORT_COMICINFO_COLLECTION AS IMPORT_COMICINFO_COLLECTION,
+             l.IMPORT_EPUB_BOOK AS IMPORT_EPUB_BOOK,
+             l.IMPORT_EPUB_SERIES AS IMPORT_EPUB_SERIES,
              COALESCE(m.STATUS, '') AS PREVIOUS_MEDIA_STATUS,
              COALESCE(m.PAGE_COUNT, 0) AS PREVIOUS_PAGE_COUNT,
              l.ROOT AS ROOT
@@ -66,15 +74,24 @@ pub(super) async fn analyze_book_input(
     .await
     .context("failed to load BOOK row for analyze")?;
 
-    Ok(row.map(|row| BookAnalysisInput {
-        url: sqlx::Row::get::<String, _>(&row, "URL"),
-        root: sqlx::Row::get::<String, _>(&row, "ROOT"),
-        analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
-        series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
-        previous_media_status: MediaStatus::parse(
-            sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS").as_str(),
-        ),
-        previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
+    Ok(row.map(|row| {
+        let comicinfo = sqlx::Row::get::<bool, _>(&row, "IMPORT_COMICINFO_BOOK")
+            || sqlx::Row::get::<bool, _>(&row, "IMPORT_COMICINFO_READLIST")
+            || sqlx::Row::get::<bool, _>(&row, "IMPORT_COMICINFO_SERIES")
+            || sqlx::Row::get::<bool, _>(&row, "IMPORT_COMICINFO_COLLECTION");
+        let epub = sqlx::Row::get::<bool, _>(&row, "IMPORT_EPUB_BOOK")
+            || sqlx::Row::get::<bool, _>(&row, "IMPORT_EPUB_SERIES");
+        BookAnalysisInput {
+            url: sqlx::Row::get::<String, _>(&row, "URL"),
+            root: sqlx::Row::get::<String, _>(&row, "ROOT"),
+            analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
+            series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
+            previous_media_status: MediaStatus::parse(
+                sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS").as_str(),
+            ),
+            previous_page_count: sqlx::Row::get::<i64, _>(&row, "PREVIOUS_PAGE_COUNT"),
+            metadata_sources: MetadataSourceRequest { comicinfo, epub },
+        }
     }))
 }
 

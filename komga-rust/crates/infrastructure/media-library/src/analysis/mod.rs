@@ -3,9 +3,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
-use komga_epub::{MOBI_MEDIA_TYPE, analyze_epub_file, normalize_mobi};
+use komga_epub::{MOBI_MEDIA_TYPE, analyze_epub_archive, normalize_mobi};
 use lopdf::{Document as PdfDocument, Object};
 
+use komga_infrastructure_media_core::content::metadata_sources::{
+    CapturedMetadataDocument, CapturedMetadataSources, MetadataSourceRequest,
+    read_comicinfo_from_zip_archive, take_comicinfo_from_rar_entries,
+};
 use komga_infrastructure_media_core::formats::rar::{
     detect_rar_media_type, read_rar_entries_bytes,
 };
@@ -13,7 +17,7 @@ use komga_infrastructure_media_core::formats::rar::{
 mod persistence;
 mod task;
 
-pub use task::{AnalyzeBookOutcome, analyze_book};
+pub use task::{AnalyzeBookOutcome, BookAnalysisPurpose, analyze_book};
 
 const IMAGE_DIMENSIONS_INITIAL_READ_BYTES: usize = 512;
 const IMAGE_DIMENSIONS_READ_CHUNK_BYTES: usize = 16 * 1024;
@@ -21,14 +25,19 @@ const IMAGE_DIMENSIONS_MAX_READ_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaAnalysisProfile {
-    PersistedBook { include_dimensions: bool },
+    PersistedBook {
+        include_dimensions: bool,
+        metadata_sources: MetadataSourceRequest,
+    },
     Transient,
 }
 
 impl MediaAnalysisProfile {
     fn include_dimensions(self) -> bool {
         match self {
-            Self::PersistedBook { include_dimensions } => include_dimensions,
+            Self::PersistedBook {
+                include_dimensions, ..
+            } => include_dimensions,
             Self::Transient => true,
         }
     }
@@ -88,6 +97,15 @@ impl MediaAnalysisProfile {
             detected
         })
     }
+
+    fn metadata_source_request(self) -> MetadataSourceRequest {
+        match self {
+            Self::PersistedBook {
+                metadata_sources, ..
+            } => metadata_sources,
+            _ => MetadataSourceRequest::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,6 +129,7 @@ pub struct MediaFileAnalysis {
     pub files: Vec<String>,
     pub media_files: Vec<AnalyzedMediaFile>,
     pub epub_extension_blob: Option<Vec<u8>>,
+    pub metadata_sources: CapturedMetadataSources,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -133,6 +152,7 @@ struct AnalyzedMediaFileContents {
     files: Vec<String>,
     media_files: Vec<AnalyzedMediaFile>,
     epub_extension_blob: Option<Vec<u8>>,
+    metadata_sources: CapturedMetadataSources,
 }
 
 fn empty_media_analysis_with_comment(
@@ -151,6 +171,10 @@ fn empty_media_analysis_with_comment(
         files: Vec::new(),
         media_files: Vec::new(),
         epub_extension_blob: None,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: CapturedMetadataDocument::NotApplicable,
+            epub: CapturedMetadataDocument::NotApplicable,
+        },
     }
 }
 
@@ -218,7 +242,7 @@ impl MediaFileAnalyzer {
                 analyze_epub_media_pages(file_path, profile)
             }
             "application/epub+zip" => analyze_zip_media_pages(file_path, profile),
-            MOBI_MEDIA_TYPE => analyze_mobi_media_pages(file_path),
+            MOBI_MEDIA_TYPE => analyze_mobi_media_pages(file_path, profile),
             "application/vnd.comicbook-rar"
             | "application/x-rar-compressed"
             | "application/x-rar-compressed; version=4"
@@ -269,6 +293,7 @@ impl MediaFileAnalyzer {
             files: contents.files,
             media_files: contents.media_files,
             epub_extension_blob: contents.epub_extension_blob,
+            metadata_sources: contents.metadata_sources,
         })
     }
 }
@@ -277,10 +302,23 @@ pub fn analyze_book_media_file(
     file_path: &Path,
     analyze_dimensions: bool,
 ) -> anyhow::Result<MediaFileAnalysis> {
+    analyze_book_media_file_with_sources(
+        file_path,
+        analyze_dimensions,
+        MetadataSourceRequest::default(),
+    )
+}
+
+pub fn analyze_book_media_file_with_sources(
+    file_path: &Path,
+    analyze_dimensions: bool,
+    metadata_sources: MetadataSourceRequest,
+) -> anyhow::Result<MediaFileAnalysis> {
     MediaFileAnalyzer.analyze(
         file_path,
         MediaAnalysisProfile::PersistedBook {
             include_dimensions: analyze_dimensions,
+            metadata_sources,
         },
     )
 }
@@ -740,21 +778,44 @@ fn analyze_zip_media_pages(
                 .join(", ")
         )
     });
+    let metadata_sources =
+        capture_comicinfo(&mut archive, profile.metadata_source_request().comicinfo);
     Ok(AnalyzedMediaFileContents {
         page_count: pages.len() as u64,
         pages,
         files,
         media_files,
         comment,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: metadata_sources,
+            epub: CapturedMetadataDocument::NotApplicable,
+        },
         ..Default::default()
     })
+}
+
+fn capture_comicinfo<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    requested: bool,
+) -> CapturedMetadataDocument {
+    if !requested {
+        return CapturedMetadataDocument::NotRequested;
+    }
+    match read_comicinfo_from_zip_archive(archive) {
+        Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
+        Ok(None) => CapturedMetadataDocument::Absent,
+        Err(error) => CapturedMetadataDocument::Failed(format!("{error:#}")),
+    }
 }
 
 fn analyze_epub_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
-    let analysis = analyze_epub_file(file_path)
+    let request = profile.metadata_source_request();
+    let file = std::fs::File::open(file_path).context("open EPUB for analysis")?;
+    let mut archive = zip::ZipArchive::new(file).context("open EPUB archive for analysis")?;
+    let analysis = analyze_epub_archive(&mut archive, request.epub)
         .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
     let mut archive = if profile.include_dimensions() {
         let file = std::fs::File::open(file_path).map_err(|error| {
@@ -823,6 +884,17 @@ fn analyze_epub_media_pages(
         pages,
         files: analysis.files,
         media_files,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: capture_comicinfo(&mut archive, request.comicinfo),
+            epub: if request.epub {
+                analysis
+                    .package_document
+                    .map(CapturedMetadataDocument::Present)
+                    .unwrap_or(CapturedMetadataDocument::Absent)
+            } else {
+                CapturedMetadataDocument::NotRequested
+            },
+        },
         epub_extension_blob: Some(analysis.extension_blob),
     })
 }
@@ -839,7 +911,10 @@ fn read_epub_image_dimensions<R: Read + std::io::Seek>(
     })
 }
 
-fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileContents> {
+fn analyze_mobi_media_pages(
+    file_path: &Path,
+    profile: MediaAnalysisProfile,
+) -> anyhow::Result<AnalyzedMediaFileContents> {
     let bytes = std::fs::read(file_path).map_err(|error| {
         anyhow::anyhow!(error).context(format!("read MOBI file '{}': ", file_path.display()))
     })?;
@@ -910,6 +985,16 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
         },
     ]);
 
+    let metadata_sources = if profile.metadata_source_request().epub {
+        match publication.resource_bytes("OEBPS/content.opf") {
+            Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
+            Ok(None) => CapturedMetadataDocument::Absent,
+            Err(error) => CapturedMetadataDocument::Failed(error.to_string()),
+        }
+    } else {
+        CapturedMetadataDocument::NotRequested
+    };
+
     Ok(AnalyzedMediaFileContents {
         comment: None,
         page_count: publication.page_count,
@@ -918,6 +1003,10 @@ fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFil
         pages,
         files,
         media_files,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: CapturedMetadataDocument::NotApplicable,
+            epub: metadata_sources,
+        },
         epub_extension_blob: Some(
             publication
                 .epub_extension_blob()
@@ -930,7 +1019,7 @@ fn analyze_rar_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
-    let entries = read_rar_entries_bytes(file_path).context("read rar entries failed")?;
+    let mut entries = read_rar_entries_bytes(file_path).context("read rar entries failed")?;
     let mut files = entries
         .iter()
         .map(|entry| entry.file_name.clone())
@@ -940,11 +1029,11 @@ fn analyze_rar_media_pages(
     let mut pages = Vec::new();
     let mut media_files = Vec::new();
     let mut entry_errors = Vec::new();
-    for entry in entries {
+    for entry in &entries {
         let media_type = media_type_from_entry_bytes(&entry.file_name, &entry.bytes);
         if !media_type.starts_with("image/") {
             media_files.push(AnalyzedMediaFile {
-                file_name: entry.file_name,
+                file_name: entry.file_name.clone(),
                 media_type: Some(media_type),
                 sub_type: None,
                 file_size: Some(entry.unpacked_size.try_into().unwrap_or(i64::MAX)),
@@ -959,7 +1048,7 @@ fn analyze_rar_media_pages(
         if profile.include_dimensions() && dimensions.is_none() {
             entry_errors.push(entry.file_name.clone());
             media_files.push(AnalyzedMediaFile {
-                file_name: entry.file_name,
+                file_name: entry.file_name.clone(),
                 media_type: None,
                 sub_type: None,
                 file_size: None,
@@ -967,7 +1056,7 @@ fn analyze_rar_media_pages(
             continue;
         }
         pages.push(analyzed_rar_media_page(
-            entry.file_name,
+            entry.file_name.clone(),
             entry.unpacked_size,
             dimensions,
         ));
@@ -984,11 +1073,22 @@ fn analyze_rar_media_pages(
         )
     });
 
+    let metadata_sources = if profile.metadata_source_request().comicinfo {
+        take_comicinfo_from_rar_entries(&mut entries)
+            .map(CapturedMetadataDocument::Present)
+            .unwrap_or(CapturedMetadataDocument::Absent)
+    } else {
+        CapturedMetadataDocument::NotRequested
+    };
     Ok(AnalyzedMediaFileContents {
         pages,
         files,
         media_files,
         comment,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: metadata_sources,
+            epub: CapturedMetadataDocument::NotApplicable,
+        },
         ..Default::default()
     })
 }
@@ -1033,6 +1133,10 @@ fn analyze_pdf_media_pages(
     Ok(AnalyzedMediaFileContents {
         pages,
         files,
+        metadata_sources: CapturedMetadataSources {
+            comicinfo: CapturedMetadataDocument::NotApplicable,
+            epub: CapturedMetadataDocument::NotApplicable,
+        },
         ..Default::default()
     })
 }
@@ -1164,6 +1268,7 @@ mod tests {
 
     use image::{ImageBuffer, Rgba};
     use komga_domain::discovery::MediaStatus;
+    use komga_infrastructure_media_core::content::metadata_sources::MetadataSourceRequest;
     use lopdf::{Document as PdfDocument, Object, Stream, dictionary};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
@@ -1303,6 +1408,7 @@ mod tests {
                 &pdf_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: true,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("pdf should analyze");
@@ -1313,6 +1419,13 @@ mod tests {
         assert_eq!(image_analysis.pages[0].height, Some(5));
         assert_eq!(pdf_analysis.status, MediaStatus::Ready);
         assert_eq!(pdf_analysis.media_type.as_str(), "application/pdf");
+        assert_eq!(
+            pdf_analysis.metadata_sources,
+            super::CapturedMetadataSources {
+                comicinfo: super::CapturedMetadataDocument::NotApplicable,
+                epub: super::CapturedMetadataDocument::NotApplicable,
+            }
+        );
         assert_eq!(pdf_analysis.pages[0].width, Some(595));
         assert_eq!(pdf_analysis.pages[0].height, Some(842));
 
@@ -1360,6 +1473,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("persisted invalid pdf analysis should record media error");
@@ -1379,6 +1493,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("missing persisted media should be recorded");
@@ -1400,6 +1515,7 @@ mod tests {
                 &media_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("filesystem probe error should be persisted as media error");
@@ -1431,6 +1547,7 @@ mod tests {
                 &path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("ZIP content with EPUB extension should analyze as ZIP");
@@ -1451,6 +1568,7 @@ mod tests {
                 &path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("unsupported persisted media should be recorded");
@@ -1471,6 +1589,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("rar4 fixture analysis should succeed");
@@ -1493,6 +1612,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("encrypted RAR analysis should be recorded");
@@ -1513,6 +1633,7 @@ mod tests {
                 &path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("invalid mobi should be represented as media error");
@@ -1536,6 +1657,7 @@ mod tests {
                 &path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("local MOBI sample should analyze");
@@ -1563,6 +1685,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("EPUB fixture analysis should succeed");
@@ -1591,6 +1714,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("fixed-layout EPUB fixture analysis should succeed");
@@ -1610,6 +1734,7 @@ mod tests {
                 &fixture_path,
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: true,
+                    metadata_sources: MetadataSourceRequest::default(),
                 },
             )
             .expect("rar4 fixture analysis should succeed");
