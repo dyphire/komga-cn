@@ -312,9 +312,13 @@ fn optional_nullable_u32_field(
         return Ok(Some(None));
     }
 
-    let Some(value) = value.as_i64() else {
-        return Err(format!("{key} must be an integer or null"));
-    };
+    let value = match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(string) => string.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| format!("{key} must be an integer or null"))?;
+
     if !(0..=i64::from(u32::MAX)).contains(&value) {
         return Err(format!("{key} must be between 0 and {}", u32::MAX));
     }
