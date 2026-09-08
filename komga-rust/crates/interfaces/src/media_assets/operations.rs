@@ -201,10 +201,17 @@ fn optional_bool(
 fn optional_f64(patch: &serde_json::Map<String, Value>, key: &str) -> anyhow::Result<Option<f64>> {
     match patch.get(key) {
         Some(value) if value.is_null() => Ok(None),
-        Some(value) => value
-            .as_f64()
-            .map(Some)
-            .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a number or null"))),
+        Some(value) => {
+            let parsed = match value {
+                Value::Number(number) => number.as_f64(),
+                Value::String(string) => string.trim().parse::<f64>().ok(),
+                _ => None,
+            };
+            parsed
+                .filter(|value| value.is_finite())
+                .map(Some)
+                .ok_or_else(|| anyhow::anyhow!(format!("{key} must be a number or null")))
+        }
         None => Ok(None),
     }
 }
