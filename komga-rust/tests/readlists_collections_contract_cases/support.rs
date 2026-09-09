@@ -513,6 +513,13 @@ pub(super) async fn seed_facet_scope_variants(paths: &RuntimeDbPaths) {
     .await
     .expect("facet secondary book metadata aggregation should be inserted");
 
+    sqlx::query("INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+        .bind("series-2")
+        .bind("other-book-tag")
+        .execute(&pool)
+        .await
+        .expect("facet secondary aggregation tag should be inserted");
+
     pool.close().await;
 }
 
