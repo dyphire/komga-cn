@@ -304,8 +304,15 @@ async fn author_values_v2_handler(
         .into_iter()
         .map(|author| if names { author.name } else { author.role })
         .collect::<Vec<_>>();
+    // Deduplicate on exact string equality first: canonically equivalent
+    // Unicode strings (e.g. "é" and "e\u{301}") compare equal under ICU but
+    // are distinct strings, so a collation-only dedup can keep repeated exact
+    // values. Byte-order sort, dedup, then sort by the active collation.
     values.sort();
     values.dedup();
+    values.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator().compare(left, right)
+    });
 
     Json(paged_values_payload(
         values.into_iter().map(FacetValueDto::String).collect(),

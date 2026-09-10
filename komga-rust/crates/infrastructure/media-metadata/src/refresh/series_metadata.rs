@@ -199,7 +199,7 @@ async fn load_series_metadata_refresh_state(
     };
 
     let genres = sqlx::query(
-        "SELECT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY GENRE COLLATE NOCASE ASC",
+        "SELECT DISTINCT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY rowid ASC",
     )
     .bind(series_id)
     .fetch_all(pool)

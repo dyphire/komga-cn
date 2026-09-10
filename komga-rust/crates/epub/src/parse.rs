@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::fmt;
+use indexmap::IndexMap;
 
 use quick_xml::Reader;
 use quick_xml::XmlVersion;
@@ -48,7 +48,7 @@ impl std::error::Error for EpubParseError {}
 pub fn parse_epub_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
-) -> Result<HashMap<String, EpubManifestItem>, EpubParseError> {
+) -> Result<IndexMap<String, EpubManifestItem>, EpubParseError> {
     parse_manifest_items(package_document, rootfile_path, DEFAULT_MANIFEST_MEDIA_TYPE)
 }
 
@@ -95,10 +95,10 @@ fn parse_manifest_items(
     package_document: &[u8],
     rootfile_path: &str,
     default_media_type: &str,
-) -> Result<HashMap<String, EpubManifestItem>, EpubParseError> {
+) -> Result<IndexMap<String, EpubManifestItem>, EpubParseError> {
     let mut reader = reader_for(package_document);
     let mut buffer = Vec::new();
-    let mut manifest = HashMap::new();
+    let mut manifest = IndexMap::new();
 
     loop {
         match reader.read_event_into(&mut buffer) {

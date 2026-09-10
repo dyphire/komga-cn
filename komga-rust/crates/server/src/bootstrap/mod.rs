@@ -9,6 +9,7 @@ use komga_config::cli_args::RuntimeCli;
 use komga_config::env_config::{RuntimeConfig, RuntimeDatabaseSettings};
 use komga_config::profile::{RuntimeMode, RuntimeProfile};
 use komga_config::writer_ownership::{WriterDecision, WriterKind};
+use komga_domain::discovery::set_sort_locale;
 use komga_infrastructure_base::{bootstrap_pool, bootstrap_tasks_pool};
 use komga_infrastructure_operational::ServerSettingsStore;
 use std::sync::Arc;
@@ -159,6 +160,7 @@ async fn run_server(startup_started_at: Instant) {
     let config = resolve_runtime_config_with_database(base_config)
         .await
         .expect("failed to merge persisted runtime settings");
+    set_sort_locale(config.sort_locale.clone());
     noclaim_bootstrap::ensure_noclaim_initial_users(&config).await;
 
     let listener = TcpListener::bind(config.bind_address)

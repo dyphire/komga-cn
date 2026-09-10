@@ -1,16 +1,11 @@
 use std::collections::HashSet;
 
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 use sqlx::{Row, SqlitePool};
-use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use komga_application::opds::{
     PersistedBookFeedRecord, PersistedNamedRecord, PersistedSeriesRecord,
 };
+use komga_domain::discovery::compare_book_names;
 
 use super::records::{parsed_age_rating, parsed_sharing_labels};
 
@@ -23,8 +18,7 @@ pub(super) async fn load_publishers(
 FROM SERIES_METADATA sm
 JOIN SERIES s ON s.ID = sm.SERIES_ID
 WHERE sm.PUBLISHER IS NOT NULL
-  AND trim(sm.PUBLISHER) != ''
-ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
+  AND trim(sm.PUBLISHER) != ''"#,
     )
     .fetch_all(pool)
     .await?;
@@ -46,24 +40,11 @@ ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
         }
     }
 
-    values.sort_by_cached_key(|value| unicode_collation_sort_key(value));
+    values.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator().compare(left, right)
+    });
 
     Ok(values)
-}
-
-pub(super) fn unicode_collation_sort_key(value: &str) -> String {
-    value
-        .nfd()
-        .filter(|ch| !is_combining_mark(*ch))
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
-}
-
-fn tertiary_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for OPDS collection sorting should construct")
 }
 
 pub(super) async fn load_collections(
@@ -77,8 +58,7 @@ pub(super) async fn load_collections(
 FROM COLLECTION c
 JOIN COLLECTION_SERIES cs ON cs.COLLECTION_ID = c.ID
 JOIN SERIES s ON s.ID = cs.SERIES_ID
-WHERE s.LIBRARY_ID = ?
-ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC"#,
+WHERE s.LIBRARY_ID = ?"#,
         )
         .bind(library_id)
         .fetch_all(pool)
@@ -86,8 +66,7 @@ ORDER BY c.NAME COLLATE NOCASE ASC, c.ID ASC"#,
     } else {
         sqlx::query(
             r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
-FROM COLLECTION
-ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
+FROM COLLECTION"#,
         )
         .fetch_all(pool)
         .await?
@@ -103,9 +82,8 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
         })
         .collect::<Vec<_>>();
 
-    let collator = tertiary_unicode_collator();
     records.sort_by(|left, right| {
-        let ordering = collator.compare(left.name.as_str(), right.name.as_str());
+        let ordering = compare_book_names(left.name.as_str(), right.name.as_str());
         if ordering.is_eq() {
             left.id.cmp(&right.id)
         } else {
@@ -193,6 +171,7 @@ pub(super) async fn load_collection_series(
 ) -> Result<Vec<PersistedSeriesRecord>, sqlx::Error> {
     let query = if ordered {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
+       COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
        COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
                  FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
@@ -206,12 +185,13 @@ LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE cs.COLLECTION_ID = ?
   AND s.DELETED_DATE IS NULL
 GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME),
          COALESCE(sm.AGE_RATING, NULL),
          COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
-ORDER BY cs.NUMBER ASC, COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC,
-         s.ID ASC"#
+ORDER BY cs.NUMBER ASC, s.ID ASC"#
     } else {
         r#"SELECT s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME) AS TITLE,
+       COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT,
        COALESCE(sm.AGE_RATING, NULL) AS AGE_RATING,
        COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
                  FROM (SELECT DISTINCT sms_inner.LABEL AS LABEL
@@ -225,25 +205,41 @@ LEFT JOIN SERIES_METADATA_SHARING sms ON sms.SERIES_ID = s.ID
 WHERE cs.COLLECTION_ID = ?
   AND s.DELETED_DATE IS NULL
 GROUP BY s.ID, s.LIBRARY_ID, COALESCE(sm.TITLE, s.NAME),
+         COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME),
          COALESCE(sm.AGE_RATING, NULL),
-         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')
-ORDER BY COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) COLLATE NOCASE ASC, s.ID ASC"#
+         COALESCE(s.LAST_MODIFIED_DATE, s.CREATED_DATE, '')"#
     };
     let rows = sqlx::query(query)
         .bind(collection_id)
         .fetch_all(pool)
         .await?;
 
-    Ok(rows
+    let mut series: Vec<(String, PersistedSeriesRecord)> = rows
         .into_iter()
-        .map(|row| PersistedSeriesRecord {
-            id: row.get::<String, _>("ID"),
-            library_id: row.get::<String, _>("LIBRARY_ID"),
-            title: row.get::<String, _>("TITLE"),
-            summary: String::new(),
-            age_rating: parsed_age_rating(&row),
-            sharing_labels: parsed_sharing_labels(&row),
-            last_modified: row.get::<String, _>("LAST_MODIFIED"),
+        .map(|row| {
+            let title_sort = row.get::<String, _>("TITLE_SORT");
+            (
+                title_sort,
+                PersistedSeriesRecord {
+                    id: row.get::<String, _>("ID"),
+                    library_id: row.get::<String, _>("LIBRARY_ID"),
+                    title: row.get::<String, _>("TITLE"),
+                    summary: String::new(),
+                    age_rating: parsed_age_rating(&row),
+                    sharing_labels: parsed_sharing_labels(&row),
+                    last_modified: row.get::<String, _>("LAST_MODIFIED"),
+                },
+            )
         })
-        .collect())
+        .collect();
+    if !ordered {
+        let collator = komga_domain::discovery::system_locale_collator();
+        series.sort_by(|left, right| {
+            collator
+                .compare(&left.0, &right.0)
+                .then_with(|| left.1.id.cmp(&right.1.id))
+        });
+    }
+
+    Ok(series.into_iter().map(|(_, record)| record).collect())
 }

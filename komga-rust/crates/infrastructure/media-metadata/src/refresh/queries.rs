@@ -102,7 +102,7 @@ pub(super) async fn load_book_metadata_for_refresh(
     };
 
     let author_rows = sqlx::query(
-        "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY ROLE ASC, NAME ASC",
+        "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -110,7 +110,7 @@ pub(super) async fn load_book_metadata_for_refresh(
     .context("query existing book metadata authors for refresh: ")?;
 
     let tag_rows = sqlx::query(
-        "SELECT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
+        "SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -118,7 +118,7 @@ pub(super) async fn load_book_metadata_for_refresh(
     .context("query existing book metadata tags for refresh")?;
 
     let link_rows = sqlx::query(
-        "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
+        "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
