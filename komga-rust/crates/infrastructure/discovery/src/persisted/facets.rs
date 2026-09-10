@@ -14,30 +14,41 @@ fn push_ids(query: &mut QueryBuilder<Sqlite>, ids: &[String]) {
     separated.push_unseparated(")");
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ReferentialTagBranch {
+    Series,
+    Book,
+    Both,
+}
+
 fn push_referential_tag_select(
     query: &mut QueryBuilder<Sqlite>,
     scope: &ReferentialTagsScope,
     authorized_library_ids: Option<&[String]>,
-    series_tags: bool,
+    branch: ReferentialTagBranch,
 ) {
-    if series_tags {
-        query.push(
-            "SELECT st.TAG AS TAG FROM SERIES_METADATA_TAG st JOIN SERIES s ON s.ID = st.SERIES_ID",
-        );
-    } else {
-        query.push(
-            "SELECT bt.TAG AS TAG FROM BOOK_METADATA_TAG bt JOIN BOOK b ON b.ID = bt.BOOK_ID",
-        );
-    }
+    let series_scoped = branch != ReferentialTagBranch::Book;
+
+    query.push(match branch {
+        ReferentialTagBranch::Series => {
+            "SELECT st.TAG AS TAG FROM SERIES_METADATA_TAG st JOIN SERIES s ON s.ID = st.SERIES_ID"
+        }
+        ReferentialTagBranch::Book => {
+            "SELECT bt.TAG AS TAG FROM BOOK_METADATA_TAG bt JOIN BOOK b ON b.ID = bt.BOOK_ID"
+        }
+        ReferentialTagBranch::Both => {
+            "SELECT at.TAG AS TAG FROM SERIES_AND_BOOK_TAG at LEFT JOIN SERIES s ON s.ID = at.SERIES_ID"
+        }
+    });
 
     match scope {
-        ReferentialTagsScope::Collections(_) => query.push(if series_tags {
-            " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"
-        } else {
-            " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID"
+        ReferentialTagsScope::Collections(_) => query.push(match branch {
+            ReferentialTagBranch::Book => " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID",
+            _ => " JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID",
         }),
-        ReferentialTagsScope::ReadLists(_) if series_tags => query
-            .push(" JOIN BOOK b ON b.SERIES_ID = s.ID JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID"),
+        ReferentialTagsScope::ReadLists(_) if series_scoped => {
+            query.push(" JOIN BOOK b ON b.SERIES_ID = s.ID JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID")
+        }
         ReferentialTagsScope::ReadLists(_) => {
             query.push(" JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID")
         }
@@ -53,7 +64,7 @@ fn push_referential_tag_select(
         ReferentialTagsScope::All => {}
         ReferentialTagsScope::Libraries(ids) => {
             condition(query);
-            query.push(if series_tags {
+            query.push(if series_scoped {
                 "s.LIBRARY_ID IN ("
             } else {
                 "b.LIBRARY_ID IN ("
@@ -67,10 +78,10 @@ fn push_referential_tag_select(
         }
         ReferentialTagsScope::Series(ids) => {
             condition(query);
-            query.push(if series_tags {
-                "s.ID IN ("
-            } else {
-                "b.SERIES_ID IN ("
+            query.push(match branch {
+                ReferentialTagBranch::Book => "b.SERIES_ID IN (",
+                ReferentialTagBranch::Both => "at.SERIES_ID IN (",
+                ReferentialTagBranch::Series => "s.ID IN (",
             });
             push_ids(query, ids);
         }
@@ -82,7 +93,7 @@ fn push_referential_tag_select(
     }
     if let Some(library_ids) = authorized_library_ids {
         condition(query);
-        query.push(if series_tags {
+        query.push(if series_scoped {
             "s.LIBRARY_ID IN ("
         } else {
             "b.LIBRARY_ID IN ("
@@ -111,15 +122,16 @@ pub(super) async fn load_persisted_referential_tags(
     }
 
     let mut query = QueryBuilder::<Sqlite>::new("SELECT DISTINCT TAG FROM (");
-    if include != ReferentialTagsInclude::Book {
-        push_referential_tag_select(&mut query, scope, authorized_library_ids, true);
-    }
-    if include == ReferentialTagsInclude::Both {
-        query.push(" UNION ALL ");
-    }
-    if include != ReferentialTagsInclude::Series {
-        push_referential_tag_select(&mut query, scope, authorized_library_ids, false);
-    }
+    push_referential_tag_select(
+        &mut query,
+        scope,
+        authorized_library_ids,
+        match include {
+            ReferentialTagsInclude::Series => ReferentialTagBranch::Series,
+            ReferentialTagsInclude::Book => ReferentialTagBranch::Book,
+            ReferentialTagsInclude::Both => ReferentialTagBranch::Both,
+        },
+    );
     query.push(")");
 
     query
@@ -202,10 +214,10 @@ pub(super) async fn load_persisted_tags(
         }
         query.push(
             r#" UNION
-              SELECT bt.TAG AS TAG
-              FROM BOOK_METADATA_TAG bt
-              JOIN BOOK b ON b.ID = bt.BOOK_ID
-              JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = b.SERIES_ID
+              SELECT bmat.TAG AS TAG
+              FROM BOOK_METADATA_AGGREGATION_TAG bmat
+              JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = bmat.SERIES_ID
+              JOIN SERIES s ON s.ID = bmat.SERIES_ID
               WHERE cs.COLLECTION_ID IN ("#,
         );
         let mut separated = query.separated(",");
@@ -214,7 +226,7 @@ pub(super) async fn load_persisted_tags(
         }
         separated.push_unseparated(")");
         if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
-            query.push(r#" AND b.LIBRARY_ID IN ("#);
+            query.push(r#" AND s.LIBRARY_ID IN ("#);
             let mut separated = query.separated(",");
             for library_id in library_ids {
                 separated.push_bind(library_id);
