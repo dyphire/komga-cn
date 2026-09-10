@@ -9,7 +9,7 @@ use tantivy::tokenizer::{
     TokenFilter, TokenStream, Tokenizer,
 };
 
-pub const SEARCH_ANALYZER_VERSION: u32 = 6;
+pub const SEARCH_ANALYZER_VERSION: u32 = 7;
 
 pub fn search_analyzer_version() -> u32 {
     SEARCH_ANALYZER_VERSION
@@ -298,9 +298,14 @@ fn cjk_bigram_approximation_tokens(token: &Token) -> Vec<Token> {
     let segments = split_token_segments(&token.text);
     let mut tokens = Vec::new();
 
-    for segment in segments {
+    for (index, segment) in segments.iter().enumerate() {
         match segment.kind {
-            SegmentKind::Cjk => tokens.extend(cjk_bigram_segment_tokens(token, &segment)),
+            SegmentKind::Cjk => tokens.extend(cjk_bigram_segment_tokens_with_boundaries(
+                token,
+                segment,
+                index > 0 && segments[index - 1].kind == SegmentKind::Other,
+                index + 1 < segments.len() && segments[index + 1].kind == SegmentKind::Other,
+            )),
             SegmentKind::Other => tokens.push(segment_token(token, segment.start, segment.end)),
         }
     }
@@ -391,24 +396,40 @@ fn split_token_segments(text: &str) -> Vec<TokenSegment> {
     segments
 }
 
-fn cjk_bigram_segment_tokens(token: &Token, segment: &TokenSegment) -> Vec<Token> {
+fn cjk_bigram_segment_tokens_with_boundaries(
+    token: &Token,
+    segment: &TokenSegment,
+    left_is_non_cjk: bool,
+    right_is_non_cjk: bool,
+) -> Vec<Token> {
     let segment_text = &token.text[segment.start..segment.end];
     let chars = segment_text.char_indices().collect::<Vec<_>>();
     if chars.len() <= 1 {
         return vec![segment_token(token, segment.start, segment.end)];
     }
 
-    (0..chars.len() - 1)
-        .map(|index| {
-            let start = segment.start + chars[index].0;
-            let end = if index + 2 >= chars.len() {
-                segment.end
-            } else {
-                segment.start + chars[index + 2].0
-            };
-            segment_token(token, start, end)
-        })
-        .collect()
+    let mut tokens = Vec::new();
+    if left_is_non_cjk {
+        tokens.push(segment_token(
+            token,
+            segment.start,
+            segment.start + chars[0].1.len_utf8(),
+        ));
+    }
+    tokens.extend((0..chars.len() - 1).map(|index| {
+        let start = segment.start + chars[index].0;
+        let end = if index + 2 >= chars.len() {
+            segment.end
+        } else {
+            segment.start + chars[index + 2].0
+        };
+        segment_token(token, start, end)
+    }));
+    if right_is_non_cjk {
+        let last = chars.len() - 1;
+        tokens.push(segment_token(token, segment.start + chars[last].0, segment.end));
+    }
+    tokens
 }
 
 fn segment_token(token: &Token, start: usize, end: usize) -> Token {
@@ -776,6 +797,92 @@ mod tests {
 
         assert!(tokens.contains(&"supercalifragilisticexpialidociousencyclopedia".to_string()));
         assert!(tokens.contains(&"alidocious".to_string()));
+    }
+
+    #[test]
+    fn multilingual_index_analyzer_emits_cjk_boundary_unigrams_next_to_non_cjk() {
+        assert_eq!(
+            collect_tokens(
+                build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+                "3月的狮子",
+            ),
+            vec![
+                "3".to_string(),
+                "月".to_string(),
+                "月的".to_string(),
+                "的狮".to_string(),
+                "狮子".to_string(),
+            ],
+            "CJK segment start adjacent to a digit should also emit the boundary unigram",
+        );
+
+        assert_eq!(
+            collect_tokens(
+                build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+                "3月のライオン",
+            ),
+            vec![
+                "3".to_string(),
+                "月".to_string(),
+                "月の".to_string(),
+                "のラ".to_string(),
+                "ライ".to_string(),
+                "イオ".to_string(),
+                "オン".to_string(),
+            ],
+            "mixed digit + CJK query terms should index the boundary unigram too",
+        );
+
+        assert_eq!(
+            collect_tokens(
+                build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+                "犬夜叉2",
+            ),
+            vec![
+                "犬夜".to_string(),
+                "夜叉".to_string(),
+                "叉".to_string(),
+                "2".to_string(),
+            ],
+            "CJK segment end adjacent to a digit should also emit the boundary unigram",
+        );
+
+        assert_eq!(
+            collect_tokens(
+                build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+                "A月的B",
+            ),
+            vec![
+                "a".to_string(),
+                "月".to_string(),
+                "月的".to_string(),
+                "的".to_string(),
+                "b".to_string(),
+            ],
+            "CJK segment sandwiched by non-CJK should emit both boundary unigrams",
+        );
+
+        assert_eq!(
+            collect_tokens(
+                build_index_time_analyzer(SearchFieldClass::MultilingualFullText),
+                "Batman 東京",
+            ),
+            vec![
+                "batman".to_string(),
+                "bat".to_string(),
+                "batm".to_string(),
+                "batma".to_string(),
+                "batman".to_string(),
+                "atm".to_string(),
+                "atma".to_string(),
+                "atman".to_string(),
+                "tma".to_string(),
+                "tman".to_string(),
+                "man".to_string(),
+                "東京".to_string(),
+            ],
+            "pure CJK segments without adjacent non-CJK must not gain boundary unigrams",
+        );
     }
 
     #[test]
