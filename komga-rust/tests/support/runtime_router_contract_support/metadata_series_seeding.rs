@@ -224,6 +224,12 @@ pub async fn seed_router_series_aggregated_tag(paths: &RuntimeDbPaths, series_id
         .await
         .expect("router contract series aggregated tag db should open");
 
+    sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_TAG WHERE SERIES_ID = ?")
+        .bind(series_id)
+        .execute(&pool)
+        .await
+        .expect("series aggregated tags should be cleared for contract test");
+
     sqlx::query(
         "INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) \
          VALUES (?, ?)",

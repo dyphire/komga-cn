@@ -238,6 +238,19 @@ pub async fn seed_router_contract_data(paths: &RuntimeDbPaths) {
     .await
     .expect("book metadata aggregation row should be inserted");
 
+    // Kotlin aggregates book tags into BOOK_METADATA_AGGREGATION_TAG
+    // (SeriesMetadataLifecycle.aggregateMetadata); mirror that here so BOTH
+    // referential tag semantics (aggregated book tags + series tags) hold.
+    sqlx::query(
+        "INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) \
+                 VALUES (?, ?)",
+    )
+    .bind("series-1")
+    .bind("favorite-tag")
+    .execute(&pool)
+    .await
+    .expect("book metadata aggregation tag row should be inserted");
+
     sqlx::query(
         "INSERT INTO READLIST (ID, NAME, BOOK_COUNT) \
                  VALUES (?, ?, ?)",
