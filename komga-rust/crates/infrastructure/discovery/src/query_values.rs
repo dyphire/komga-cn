@@ -12,7 +12,7 @@ pub(super) struct ScopedStringQuery<'a> {
     pub collection_join: &'a str,
     pub library_column: &'a str,
     pub extra_condition: Option<&'a str>,
-    pub order_by: &'a str,
+    pub order_by: Option<&'a str>,
 }
 
 pub(super) async fn load_persisted_scoped_strings(
@@ -59,8 +59,10 @@ pub(super) async fn load_persisted_scoped_strings(
         builder.push(extra_condition);
     }
 
-    builder.push(" ORDER BY ");
-    builder.push(query.order_by);
+    if let Some(order_by) = query.order_by {
+        builder.push(" ORDER BY ");
+        builder.push(order_by);
+    }
 
     let rows = builder.build().fetch_all(pool).await.map_err(|error| {
         anyhow::anyhow!(error).context(format!("query persisted {}: ", query.label))

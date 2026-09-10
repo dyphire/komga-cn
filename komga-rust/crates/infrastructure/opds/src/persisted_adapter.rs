@@ -19,7 +19,6 @@ use komga_infrastructure_base::DatabaseHandle;
 use komga_infrastructure_search::SearchEntityType;
 use komga_infrastructure_search::engine::SearchIndexEngine;
 
-use super::collections::unicode_collation_sort_key;
 use super::collections::{
     load_collection, load_collection_books, load_collection_series, load_collections,
     load_publishers,
@@ -441,14 +440,13 @@ async fn load_readlists_for_library(
 FROM READLIST rl
 JOIN READLIST_BOOK rb ON rb.READLIST_ID = rl.ID
 JOIN BOOK b ON b.ID = rb.BOOK_ID
-WHERE b.LIBRARY_ID = ?
-ORDER BY rl.NAME COLLATE NOCASE ASC, rl.ID ASC"#,
+WHERE b.LIBRARY_ID = ?"#,
     )
     .bind(library_id)
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
+    let mut records: Vec<PersistedReadlistRecord> = rows
         .into_iter()
         .map(|row| PersistedReadlistRecord {
             id: row.get::<String, _>("ID"),
@@ -456,7 +454,14 @@ ORDER BY rl.NAME COLLATE NOCASE ASC, rl.ID ASC"#,
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
             ordered: row.get::<bool, _>("ORDERED"),
         })
-        .collect())
+        .collect();
+    records.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator()
+            .compare(&left.name, &right.name)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(records)
 }
 
 async fn load_all_readlists(
@@ -468,13 +473,12 @@ async fn load_all_readlists(
     NAME,
     ORDERED,
     COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
-FROM READLIST
-ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
+FROM READLIST"#,
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
+    let mut records: Vec<PersistedReadlistRecord> = rows
         .into_iter()
         .map(|row| PersistedReadlistRecord {
             id: row.get::<String, _>("ID"),
@@ -482,7 +486,14 @@ ORDER BY NAME COLLATE NOCASE ASC, ID ASC"#,
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
             ordered: row.get::<bool, _>("ORDERED"),
         })
-        .collect())
+        .collect();
+    records.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator()
+            .compare(&left.name, &right.name)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(records)
 }
 
 async fn load_series(
@@ -626,19 +637,23 @@ async fn load_series_tags(pool: &SqlitePool, series_id: &str) -> Result<Vec<Stri
         r#"SELECT DISTINCT bt.TAG AS TAG
 FROM BOOK_METADATA_TAG bt
 LEFT JOIN BOOK b ON bt.BOOK_ID = b.ID
-WHERE b.SERIES_ID = ?
-ORDER BY bt.TAG COLLATE NOCASE ASC, bt.TAG ASC"#,
+WHERE b.SERIES_ID = ?"#,
     )
     .bind(series_id)
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
+    let mut tags = rows
         .into_iter()
         .map(|row| row.get::<String, _>("TAG"))
         .map(|tag| tag.trim().to_string())
         .filter(|tag| !tag.is_empty())
-        .collect())
+        .collect::<Vec<_>>();
+    tags.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator().compare(left, right)
+    });
+
+    Ok(tags)
 }
 
 async fn load_readlist(
@@ -979,7 +994,9 @@ WHERE ID IN ({})"#,
         })
         .collect::<Vec<_>>();
 
-    records.sort_by_cached_key(|record| unicode_collation_sort_key(record.name.as_str()));
+    records.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator().compare(&left.name, &right.name)
+    });
 
     Ok(records)
 }
@@ -1106,11 +1123,8 @@ async fn load_collection_search_records_limited(
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
-FROM COLLECTION
-ORDER BY NAME COLLATE NOCASE ASC, ID ASC
-LIMIT ?"#,
+FROM COLLECTION"#,
     )
-    .bind(limit)
     .fetch_all(pool)
     .await?;
     let mut records = rows
@@ -1123,7 +1137,12 @@ LIMIT ?"#,
         })
         .collect::<Vec<_>>();
 
-    records.sort_by_cached_key(|record| unicode_collation_sort_key(record.name.as_str()));
+    records.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator()
+            .compare(&left.name, &right.name)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    records.truncate(limit as usize);
 
     Ok(records)
 }
@@ -1134,14 +1153,11 @@ async fn load_readlist_search_records_limited(
 ) -> Result<Vec<PersistedNamedRecord>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT ID, NAME, ORDERED, COALESCE(LAST_MODIFIED_DATE, CREATED_DATE, '') AS LAST_MODIFIED
-FROM READLIST
-ORDER BY NAME COLLATE NOCASE ASC, ID ASC
-LIMIT ?"#,
+FROM READLIST"#,
     )
-    .bind(limit)
     .fetch_all(pool)
     .await?;
-    Ok(rows
+    let mut records: Vec<PersistedNamedRecord> = rows
         .into_iter()
         .map(|row| PersistedNamedRecord {
             id: row.get::<String, _>("ID"),
@@ -1149,7 +1165,15 @@ LIMIT ?"#,
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
             ordered: row.get::<bool, _>("ORDERED"),
         })
-        .collect())
+        .collect();
+    records.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator()
+            .compare(&left.name, &right.name)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    records.truncate(limit as usize);
+
+    Ok(records)
 }
 #[cfg(test)]
 mod tests {
@@ -1218,4 +1242,65 @@ mod tests {
         assert!(readlist_rows_limited[0].ordered);
         pool.close().await;
     }
+    #[tokio::test]
+    async fn limited_named_records_sort_icu_and_keep_icu_boundary_members() {
+        let pool = open_bootstrapped_pool("opds-limited-icu-boundary").await;
+        // Names deliberately mix case so SQLite COLLATE NOCASE ties "Alpha" and
+        // "alpha" (preserving insertion order), while the ICU collator orders
+        // lowercase before uppercase. A NOCASE + LIMIT query would therefore
+        // return "Alpha" for limit=1; the ICU ordering must return "alpha".
+        let names = ["Alpha", "alpha", "Beta", "gamma", "Zulu"];
+        for (index, name) in names.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO COLLECTION (ID, NAME, ORDERED, SERIES_COUNT) VALUES (?, ?, ?, ?)",
+            )
+            .bind(format!("collection-{index}"))
+            .bind(*name)
+            .bind(false)
+            .bind(0_i64)
+            .execute(&pool)
+            .await
+            .expect("collection should be inserted");
+            sqlx::query("INSERT INTO READLIST (ID, NAME, BOOK_COUNT, ORDERED) VALUES (?, ?, ?, ?)")
+                .bind(format!("readlist-{index}"))
+                .bind(*name)
+                .bind(0_i64)
+                .bind(false)
+                .execute(&pool)
+                .await
+                .expect("readlist should be inserted");
+        }
+
+        let collator = komga_domain::discovery::system_locale_collator();
+        let mut expected = names.to_vec();
+        expected.sort_by(|left, right| collator.compare(left, right));
+
+        let collection_rows = load_collection_search_records_limited(&pool, 20)
+            .await
+            .expect("limited collection search rows should load");
+        let readlist_rows = load_readlist_search_records_limited(&pool, 20)
+            .await
+            .expect("limited readlist search rows should load");
+        let collection_names: Vec<&str> = collection_rows
+            .iter()
+            .map(|record| record.name.as_str())
+            .collect();
+        let readlist_names: Vec<&str> = readlist_rows
+            .iter()
+            .map(|record| record.name.as_str())
+            .collect();
+        assert_eq!(collection_names, expected, "collections should follow ICU order");
+        assert_eq!(readlist_names, expected, "readlists should follow ICU order");
+
+        let collection_one = load_collection_search_records_limited(&pool, 1)
+            .await
+            .expect("limited collection search rows should load");
+        let readlist_one = load_readlist_search_records_limited(&pool, 1)
+            .await
+            .expect("limited readlist search rows should load");
+        assert_eq!(collection_one[0].name, "alpha", "limit boundary must use the ICU-first member");
+        assert_eq!(readlist_one[0].name, "alpha", "limit boundary must use the ICU-first member");
+        pool.close().await;
+    }
+
 }

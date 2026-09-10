@@ -4,6 +4,7 @@ use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use komga_application::discovery::{ReferentialTagsInclude, ReferentialTagsScope};
 
 use crate::query_values;
+use super::sort_values_icu;
 
 fn push_ids(query: &mut QueryBuilder<Sqlite>, ids: &[String]) {
     let mut separated = query.separated(",");
@@ -119,7 +120,7 @@ pub(super) async fn load_persisted_referential_tags(
     if include != ReferentialTagsInclude::Series {
         push_referential_tag_select(&mut query, scope, authorized_library_ids, false);
     }
-    query.push(") ORDER BY lower(TAG), TAG");
+    query.push(")");
 
     query
         .build()
@@ -127,9 +128,12 @@ pub(super) async fn load_persisted_referential_tags(
         .await
         .context("query persisted referential tags")
         .map(|rows| {
-            rows.into_iter()
+            let mut values: Vec<String> = rows
+                .into_iter()
                 .map(|row| row.get::<String, _>("TAG"))
-                .collect()
+                .collect();
+            sort_values_icu(&mut values);
+            values
         })
 }
 
@@ -138,7 +142,7 @@ pub(super) async fn load_persisted_genres(
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<String>> {
-    query_values::load_persisted_scoped_strings(
+    let mut values = query_values::load_persisted_scoped_strings(
         pool,
         &query_values::ScopedStringQuery {
             library_ids,
@@ -150,10 +154,13 @@ pub(super) async fn load_persisted_genres(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: None,
-            order_by: "lower(g.GENRE), g.GENRE, s.ID",
+            order_by: None,
         },
     )
-    .await
+    .await?;
+
+    sort_values_icu(&mut values);
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_tags(
@@ -214,7 +221,7 @@ pub(super) async fn load_persisted_tags(
             }
             separated.push_unseparated(")");
         }
-        query.push(r#" ) ORDER BY lower(TAG), TAG"#);
+        query.push(r#" )"#);
         query.build().fetch_all(pool).await
     } else if let Some(library_ids) = library_ids.filter(|ids| !ids.is_empty()) {
         let mut query = QueryBuilder::<Sqlite>::new(
@@ -240,7 +247,7 @@ pub(super) async fn load_persisted_tags(
         for library_id in library_ids {
             separated.push_bind(library_id);
         }
-        separated.push_unseparated(") ) ORDER BY lower(TAG), TAG");
+        separated.push_unseparated(") )");
         query.build().fetch_all(pool).await
     } else {
         sqlx::query(
@@ -252,18 +259,19 @@ pub(super) async fn load_persisted_tags(
                  UNION
                  SELECT bt.TAG AS TAG
                  FROM BOOK_METADATA_TAG bt
-                 JOIN BOOK b ON b.ID = bt.BOOK_ID )
-             ORDER BY lower(TAG), TAG"#,
+                 JOIN BOOK b ON b.ID = bt.BOOK_ID )"#,
         )
         .fetch_all(pool)
         .await
     }
     .context("query persisted tags")?;
 
-    Ok(rows
+    let mut values: Vec<String> = rows
         .into_iter()
         .map(|row| row.get::<String, _>("TAG"))
-        .collect())
+        .collect();
+    sort_values_icu(&mut values);
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_languages(
@@ -271,7 +279,7 @@ pub(super) async fn load_persisted_languages(
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<String>> {
-    query_values::load_persisted_scoped_strings(
+    let mut values = query_values::load_persisted_scoped_strings(
         pool,
         &query_values::ScopedStringQuery {
             library_ids,
@@ -283,10 +291,13 @@ pub(super) async fn load_persisted_languages(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: Some("sm.LANGUAGE <> ''"),
-            order_by: "lower(sm.LANGUAGE), sm.LANGUAGE",
+            order_by: None,
         },
     )
-    .await
+    .await?;
+
+    sort_values_icu(&mut values);
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_publishers(
@@ -294,7 +305,7 @@ pub(super) async fn load_persisted_publishers(
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<String>> {
-    query_values::load_persisted_scoped_strings(
+    let mut values = query_values::load_persisted_scoped_strings(
         pool,
         &query_values::ScopedStringQuery {
             library_ids,
@@ -306,10 +317,13 @@ pub(super) async fn load_persisted_publishers(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: Some("sm.PUBLISHER <> ''"),
-            order_by: "lower(sm.PUBLISHER), sm.PUBLISHER",
+            order_by: None,
         },
     )
-    .await
+    .await?;
+
+    sort_values_icu(&mut values);
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_age_ratings(
@@ -374,7 +388,7 @@ pub(super) async fn load_persisted_sharing_labels(
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<String>> {
-    query_values::load_persisted_scoped_strings(
+    let mut values = query_values::load_persisted_scoped_strings(
         pool,
         &query_values::ScopedStringQuery {
             library_ids,
@@ -386,10 +400,13 @@ pub(super) async fn load_persisted_sharing_labels(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: None,
-            order_by: "lower(sms.LABEL), sms.LABEL",
+            order_by: None,
         },
     )
-    .await
+    .await?;
+
+    sort_values_icu(&mut values);
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_series_release_dates(
@@ -409,7 +426,7 @@ pub(super) async fn load_persisted_series_release_dates(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: Some("bma.RELEASE_DATE IS NOT NULL AND bma.RELEASE_DATE <> ''"),
-            order_by: "bma.RELEASE_DATE DESC",
+            order_by: Some("bma.RELEASE_DATE DESC"),
         },
     )
     .await?;
@@ -434,7 +451,7 @@ pub(super) async fn load_persisted_series_tags(
     library_ids: Option<&[String]>,
     collection_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<String>> {
-    query_values::load_persisted_scoped_strings(
+    let mut values = query_values::load_persisted_scoped_strings(
         pool,
         &query_values::ScopedStringQuery {
             library_ids,
@@ -446,8 +463,11 @@ pub(super) async fn load_persisted_series_tags(
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = st.SERIES_ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: None,
-            order_by: "lower(st.TAG), st.TAG",
+            order_by: None,
         },
     )
-    .await
+    .await?;
+
+    sort_values_icu(&mut values);
+    Ok(values)
 }

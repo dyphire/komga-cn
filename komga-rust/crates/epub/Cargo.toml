@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 flate2.workspace = true
 iepub.workspace = true
+indexmap.workspace = true
 quick-xml.workspace = true
 serde_json.workspace = true
 zip.workspace = true

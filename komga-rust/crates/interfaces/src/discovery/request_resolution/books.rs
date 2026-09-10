@@ -865,11 +865,33 @@ pub(super) fn parse_book_sorts_from_json(sorts: Option<&Value>, has_search: bool
     parse_book_sorts_from_json_values(&strs, has_search)
 }
 
+fn expand_book_sort_string(s: &str) -> Vec<String> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() <= 2 {
+        return vec![s.to_string()];
+    }
+
+    let direction = parts.last().map(|p| p.trim()).unwrap_or_default();
+    if !direction.eq_ignore_ascii_case("asc") && !direction.eq_ignore_ascii_case("desc") {
+        return vec![s.to_string()];
+    }
+
+    parts[..parts.len() - 1]
+        .iter()
+        .map(|field| format!("{},{}", field.trim(), direction))
+        .collect()
+}
+
 pub(super) fn parse_book_sorts_from_json_values(
     sorts: &[String],
     has_search: bool,
 ) -> Vec<BookSort> {
-    let mut result = sorts
+    let expanded: Vec<String> = sorts
+        .iter()
+        .flat_map(|s| expand_book_sort_string(s.trim()))
+        .collect();
+
+    let mut result = expanded
         .iter()
         .filter_map(|s| {
             let trimmed = s.trim();
@@ -910,9 +932,7 @@ pub(super) fn parse_book_sorts_from_json_values(
                 }
                 "metadata.releaseDate,asc" => Some(BookSort::ReleaseDateAsc),
                 "metadata.releaseDate,desc" => Some(BookSort::ReleaseDateDesc),
-                "metadata.numberSort,asc" | "number,asc" | "series,metadata.numberSort,asc" => {
-                    Some(BookSort::NumberSortAsc)
-                }
+                "metadata.numberSort,asc" | "number,asc" => Some(BookSort::NumberSortAsc),
                 "metadata.numberSort,desc" | "number,desc" => Some(BookSort::NumberSortDesc),
                 "seriesId,asc" => Some(BookSort::SeriesIdAsc),
                 "readList.number,asc" | "readList.number" => Some(BookSort::ReadListNumberAsc),
@@ -924,7 +944,7 @@ pub(super) fn parse_book_sorts_from_json_values(
         })
         .collect::<Vec<_>>();
     result.dedup();
-    if result.is_empty() && sorts.is_empty() && has_search {
+    if result.is_empty() && expanded.is_empty() && has_search {
         result.push(BookSort::RelevanceAsc);
     }
     result
