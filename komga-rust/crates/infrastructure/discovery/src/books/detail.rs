@@ -40,9 +40,10 @@ pub(crate) async fn load_persisted_book_resource(
     let row = sqlx::query(
         r#"SELECT b.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
-                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                          FROM (SELECT sms.LABEL AS LABEL
                                 FROM SERIES_METADATA_SHARING sms
-                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
+                                WHERE sms.SERIES_ID = s.ID
+                                ORDER BY sms.rowid)), '') AS SHARING_LABELS
          FROM BOOK b
          JOIN SERIES s ON s.ID = b.SERIES_ID
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID

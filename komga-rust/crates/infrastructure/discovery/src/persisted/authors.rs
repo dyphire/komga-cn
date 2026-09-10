@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
+use super::sort_values_icu;
 use crate::records::{AuthorEntry, AuthorsScope};
 
 pub(super) async fn load_persisted_author_names(
@@ -32,7 +33,6 @@ pub(super) async fn load_persisted_author_names(
         separated.push_unseparated(")");
     }
 
-    query.push(r#" ORDER BY lower(a.NAME), a.NAME"#);
 
     let rows = query
         .build()
@@ -41,11 +41,13 @@ pub(super) async fn load_persisted_author_names(
         .context("query persisted author names")?;
 
     let search = author_search_key(search);
-    Ok(rows
+    let mut names: Vec<String> = rows
         .into_iter()
         .map(|row| row.get::<String, _>("NAME"))
         .filter(|name| search.is_empty() || author_search_key(name).contains(&search))
-        .collect())
+        .collect();
+    sort_values_icu(&mut names);
+    Ok(names)
 }
 
 pub(super) async fn load_persisted_author_roles(
@@ -73,7 +75,6 @@ pub(super) async fn load_persisted_author_roles(
         separated.push_unseparated(")");
     }
 
-    query.push(r#" ORDER BY lower(a.ROLE), a.ROLE"#);
 
     let rows = query
         .build()
@@ -81,10 +82,12 @@ pub(super) async fn load_persisted_author_roles(
         .await
         .context("query persisted author roles")?;
 
-    Ok(rows
+    let mut roles: Vec<String> = rows
         .into_iter()
         .map(|row| row.get::<String, _>("ROLE"))
-        .collect())
+        .collect();
+    sort_values_icu(&mut roles);
+    Ok(roles)
 }
 
 fn author_search_key(value: &str) -> String {
@@ -183,7 +186,6 @@ pub(super) async fn load_persisted_authors_by_scope(
         separated.push_unseparated(")");
     }
 
-    query.push(r#" ORDER BY lower(a.NAME), lower(a.ROLE), a.NAME, a.ROLE, b.ID"#);
 
     let rows = query
         .build()
@@ -200,6 +202,13 @@ pub(super) async fn load_persisted_authors_by_scope(
             authors.push(AuthorEntry { name, role });
         }
     }
+
+    let collator = komga_domain::discovery::system_locale_collator();
+    authors.sort_by(|left, right| {
+        collator
+            .compare(&left.name, &right.name)
+            .then_with(|| collator.compare(&left.role, &right.role))
+    });
 
     Ok(authors)
 }

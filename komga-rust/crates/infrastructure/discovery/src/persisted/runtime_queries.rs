@@ -6,6 +6,8 @@ use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::records::{BookBrowseEntry, BookTagsScope};
 
+use super::sort_values_icu;
+
 pub(super) async fn load_persisted_ondeck_books(
     pool: &SqlitePool,
     user_id: &str,
@@ -112,7 +114,6 @@ pub(super) async fn load_persisted_book_tags(
                 }
                 separated.push_unseparated(")");
             }
-            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(pool).await
         }
         BookTagsScope::Series(series_id) => {
@@ -133,7 +134,6 @@ pub(super) async fn load_persisted_book_tags(
                 }
                 separated.push_unseparated(")");
             }
-            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(pool).await
         }
         BookTagsScope::Libraries(library_ids) => {
@@ -158,7 +158,6 @@ pub(super) async fn load_persisted_book_tags(
                 }
                 separated.push_unseparated(")");
             }
-            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(pool).await
         }
         BookTagsScope::ReadList(readlist_id) => {
@@ -180,7 +179,6 @@ pub(super) async fn load_persisted_book_tags(
                 }
                 separated.push_unseparated(")");
             }
-            query.push(r#" ORDER BY lower(bt.TAG), bt.TAG, b.ID"#);
             query.build().fetch_all(pool).await
         }
     }
@@ -194,6 +192,7 @@ pub(super) async fn load_persisted_book_tags(
             tags.push(tag);
         }
     }
+    sort_values_icu(&mut tags);
 
     Ok(tags)
 }
