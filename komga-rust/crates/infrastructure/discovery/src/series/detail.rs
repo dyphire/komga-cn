@@ -17,9 +17,10 @@ pub(crate) async fn load_persisted_series_resource(
     let row = sqlx::query(
         r#"SELECT s.LIBRARY_ID, sm.AGE_RATING,
                 COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
-                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                          FROM (SELECT sms.LABEL AS LABEL
                                 FROM SERIES_METADATA_SHARING sms
-                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
+                                WHERE sms.SERIES_ID = s.ID
+                                ORDER BY sms.rowid)), '') AS SHARING_LABELS
          FROM SERIES s
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
          WHERE s.ID = ?
@@ -78,9 +79,10 @@ pub(crate) async fn load_persisted_series_detail(
                 COALESCE(sm.CREATED_DATE, s.CREATED_DATE) AS METADATA_CREATED,
                 COALESCE(sm.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
                 COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
-                          FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                          FROM (SELECT sms.LABEL AS LABEL
                                 FROM SERIES_METADATA_SHARING sms
-                                WHERE sms.SERIES_ID = s.ID)), '') AS SHARING_LABELS
+                                WHERE sms.SERIES_ID = s.ID
+                                ORDER BY sms.rowid)), '') AS SHARING_LABELS
          FROM SERIES s
          LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
          WHERE s.ID = ?
@@ -207,7 +209,7 @@ pub(crate) async fn load_existing_series_metadata(
     };
 
     let genres = sqlx::query(
-        r#"SELECT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY GENRE COLLATE NOCASE ASC"#,
+        r#"SELECT DISTINCT GENRE FROM SERIES_METADATA_GENRE WHERE SERIES_ID = ? ORDER BY rowid ASC"#,
     )
     .bind(series_id)
     .fetch_all(pool)
@@ -218,7 +220,7 @@ pub(crate) async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     let tags = sqlx::query(
-        r#"SELECT TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ? ORDER BY TAG COLLATE NOCASE ASC"#,
+        r#"SELECT DISTINCT TAG FROM SERIES_METADATA_TAG WHERE SERIES_ID = ? ORDER BY rowid ASC"#,
     )
     .bind(series_id)
     .fetch_all(pool)
@@ -229,9 +231,9 @@ pub(crate) async fn load_existing_series_metadata(
     .collect::<Vec<_>>();
 
     let sharing_labels = sqlx::query(
-        r#"SELECT LABEL FROM SERIES_METADATA_SHARING
+        r#"SELECT DISTINCT LABEL FROM SERIES_METADATA_SHARING
              WHERE SERIES_ID = ?
-             ORDER BY LABEL COLLATE NOCASE ASC"#,
+             ORDER BY rowid ASC"#,
     )
     .bind(series_id)
     .fetch_all(pool)
@@ -244,7 +246,7 @@ pub(crate) async fn load_existing_series_metadata(
     let links = sqlx::query(
         r#"SELECT LABEL, URL FROM SERIES_METADATA_LINK
              WHERE SERIES_ID = ?
-             ORDER BY LABEL COLLATE NOCASE ASC, URL ASC"#,
+             ORDER BY rowid ASC"#,
     )
     .bind(series_id)
     .fetch_all(pool)
@@ -260,7 +262,7 @@ pub(crate) async fn load_existing_series_metadata(
     let alternate_titles = sqlx::query(
         r#"SELECT LABEL, TITLE FROM SERIES_METADATA_ALTERNATE_TITLE
              WHERE SERIES_ID = ?
-             ORDER BY LABEL COLLATE NOCASE ASC, TITLE COLLATE NOCASE ASC"#,
+             ORDER BY rowid ASC"#,
     )
     .bind(series_id)
     .fetch_all(pool)
@@ -511,3 +513,99 @@ pub(crate) async fn refresh_series_after_metadata_update(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use komga_infrastructure_test_support::BootstrappedBookFixture;
+
+    #[tokio::test]
+    async fn load_existing_series_metadata_preserves_metadata_insertion_order() {
+        let fixture = BootstrappedBookFixture::open("series-detail-metadata-order").await;
+        fixture.insert_library_series().await;
+        fixture.insert_series_metadata().await;
+
+        for genre in ["Zeta", "Alpha", "Zeta"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(genre)
+                .execute(&fixture.pool)
+                .await
+                .expect("genre should be inserted");
+        }
+        for tag in ["Omega", "Beta", "Omega"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(tag)
+                .execute(&fixture.pool)
+                .await
+                .expect("tag should be inserted");
+        }
+        for label in ["Zed", "Alpha", "Zed"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(label)
+                .execute(&fixture.pool)
+                .await
+                .expect("sharing label should be inserted");
+        }
+        for (label, url) in [("Zed", "https://z.example"), ("Alpha", "https://a.example")] {
+            sqlx::query("INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL) VALUES (?, ?, ?)")
+                .bind("series-1")
+                .bind(label)
+                .bind(url)
+                .execute(&fixture.pool)
+                .await
+                .expect("series link should be inserted");
+        }
+        for (label, title) in [("en", "Second Title"), ("en", "First Title")] {
+            sqlx::query(
+                "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+            )
+            .bind("series-1")
+            .bind(label)
+            .bind(title)
+            .execute(&fixture.pool)
+            .await
+            .expect("alternate title should be inserted");
+        }
+
+        let metadata = load_existing_series_metadata(&fixture.pool, "series-1")
+            .await
+            .expect("series metadata should load")
+            .expect("series metadata should exist");
+
+        assert_eq!(metadata.genres, vec!["Zeta", "Alpha"]);
+        assert_eq!(metadata.tags, vec!["Omega", "Beta"]);
+        assert_eq!(metadata.sharing_labels, vec!["Zed", "Alpha"]);
+        assert_eq!(
+            metadata.links,
+            vec![
+                SeriesMetadataLinkRecord {
+                    label: "Zed".to_string(),
+                    url: "https://z.example".to_string(),
+                },
+                SeriesMetadataLinkRecord {
+                    label: "Alpha".to_string(),
+                    url: "https://a.example".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            metadata.alternate_titles,
+            vec![
+                SeriesAlternateTitleRecord {
+                    label: "en".to_string(),
+                    title: "Second Title".to_string(),
+                },
+                SeriesAlternateTitleRecord {
+                    label: "en".to_string(),
+                    title: "First Title".to_string(),
+                },
+            ]
+        );
+        fixture.close().await;
+    }
+}
+
+

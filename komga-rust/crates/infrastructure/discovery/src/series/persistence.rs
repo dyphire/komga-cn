@@ -88,48 +88,55 @@ async fn fetch_persisted_series_summary_rows(
                    COALESCE(bma.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS BOOKS_METADATA_LAST_MODIFIED,
                    s.NAME AS NAME,
                    COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
-                             FROM (SELECT DISTINCT sms.LABEL AS LABEL
+                             FROM (SELECT sms.LABEL AS LABEL
                                    FROM SERIES_METADATA_SHARING sms
-                                   WHERE sms.SERIES_ID = s.ID)), '') AS LABELS,
+                                   WHERE sms.SERIES_ID = s.ID
+                                   ORDER BY sms.rowid)), '') AS LABELS,
                   COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                            FROM (SELECT smg.GENRE AS GENRE
                                   FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
+                                  WHERE smg.SERIES_ID = s.ID
+                                  ORDER BY smg.rowid)), '') AS GENRES,
                   COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
-                            FROM (SELECT DISTINCT smt.TAG AS TAG
+                            FROM (SELECT smt.TAG AS TAG
                                   FROM SERIES_METADATA_TAG smt
-                                  WHERE smt.SERIES_ID = s.ID)), '') AS TAGS,
+                                  WHERE smt.SERIES_ID = s.ID
+                                  ORDER BY smt.rowid)), '') AS TAGS,
                   COALESCE(
                     (SELECT GROUP_CONCAT(ALTERNATE_TITLE, char(30))
-                     FROM (SELECT DISTINCT CASE
+                     FROM (SELECT CASE
                              WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
                              ELSE smat.LABEL || '::' || smat.TITLE
                            END AS ALTERNATE_TITLE
                            FROM SERIES_METADATA_ALTERNATE_TITLE smat
-                           WHERE smat.SERIES_ID = s.ID)),
+                           WHERE smat.SERIES_ID = s.ID
+                           ORDER BY smat.rowid)),
                     ''
                   ) AS ALTERNATE_TITLES,
                   COALESCE(
                     (SELECT GROUP_CONCAT(LINK, char(30))
-                     FROM (SELECT DISTINCT sml.LABEL || char(31) || sml.URL AS LINK
+                     FROM (SELECT sml.LABEL || char(31) || sml.URL AS LINK
                            FROM SERIES_METADATA_LINK sml
-                           WHERE sml.SERIES_ID = s.ID)),
+                           WHERE sml.SERIES_ID = s.ID
+                           ORDER BY sml.rowid)),
                     ''
                   ) AS LINKS,
                   COALESCE(
                     (SELECT GROUP_CONCAT(AUTHOR, char(30))
-                     FROM (SELECT DISTINCT CASE
+                     FROM (SELECT CASE
                              WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
                              ELSE bmaa.NAME || '::' || bmaa.ROLE
                            END AS AUTHOR
                            FROM BOOK_METADATA_AGGREGATION_AUTHOR bmaa
-                           WHERE bmaa.SERIES_ID = s.ID)),
+                           WHERE bmaa.SERIES_ID = s.ID
+                           ORDER BY bmaa.rowid)),
                     ''
                   ) AS BOOKS_METADATA_AUTHORS,
                   COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
-                            FROM (SELECT DISTINCT bmat.TAG AS TAG
+                            FROM (SELECT bmat.TAG AS TAG
                                   FROM BOOK_METADATA_AGGREGATION_TAG bmat
-                                  WHERE bmat.SERIES_ID = s.ID)), '') AS BOOKS_METADATA_TAGS
+                                  WHERE bmat.SERIES_ID = s.ID
+                                  ORDER BY bmat.rowid)), '') AS BOOKS_METADATA_TAGS
            FROM SERIES s
            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
            LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
@@ -398,4 +405,95 @@ mod tests {
         assert!(summary.alternate_titles_lock);
         fixture.close().await;
     }
+
+    #[tokio::test]
+    async fn load_persisted_series_summaries_preserves_multi_value_insertion_order() {
+        let fixture = BootstrappedBookFixture::open("series-summary-insertion-order").await;
+        fixture.insert_library_series().await;
+        fixture.insert_series_metadata().await;
+
+        for label in ["Beta", "Alpha", "Beta"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_SHARING (SERIES_ID, LABEL) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(label)
+                .execute(&fixture.pool)
+                .await
+                .expect("sharing label should be inserted");
+        }
+        for genre in ["Zeta", "Alpha", "Zeta"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(genre)
+                .execute(&fixture.pool)
+                .await
+                .expect("genre should be inserted");
+        }
+        for tag in ["Omega", "Beta", "Omega"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_TAG (SERIES_ID, TAG) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(tag)
+                .execute(&fixture.pool)
+                .await
+                .expect("tag should be inserted");
+        }
+        for (label, url) in [("Zed", "https://z.example"), ("Alpha", "https://a.example")] {
+            sqlx::query("INSERT INTO SERIES_METADATA_LINK (SERIES_ID, LABEL, URL) VALUES (?, ?, ?)")
+                .bind("series-1")
+                .bind(label)
+                .bind(url)
+                .execute(&fixture.pool)
+                .await
+                .expect("series link should be inserted");
+        }
+        for (label, title) in [("en", "Second Title"), ("en", "First Title")] {
+            sqlx::query(
+                "INSERT INTO SERIES_METADATA_ALTERNATE_TITLE (SERIES_ID, LABEL, TITLE) VALUES (?, ?, ?)",
+            )
+            .bind("series-1")
+            .bind(label)
+            .bind(title)
+            .execute(&fixture.pool)
+            .await
+            .expect("alternate title should be inserted");
+        }
+
+        let summaries = load_persisted_series_summaries(&fixture.pool)
+            .await
+            .expect("series summary should load");
+        let summary = summaries
+            .first()
+            .expect("series summary should include seeded series");
+
+        assert_eq!(summary.labels, vec!["Beta", "Alpha", "Beta"]);
+        assert_eq!(summary.genres, vec!["Zeta", "Alpha", "Zeta"]);
+        assert_eq!(summary.tags, vec!["Omega", "Beta", "Omega"]);
+        assert_eq!(
+            summary.links,
+            vec![
+                SeriesMetadataLinkRecord {
+                    label: "Zed".to_string(),
+                    url: "https://z.example".to_string(),
+                },
+                SeriesMetadataLinkRecord {
+                    label: "Alpha".to_string(),
+                    url: "https://a.example".to_string(),
+                },
+            ]
+        );
+        assert_eq!(
+            summary.alternate_titles,
+            vec![
+                SeriesAlternateTitleRecord {
+                    label: "en".to_string(),
+                    title: "Second Title".to_string(),
+                },
+                SeriesAlternateTitleRecord {
+                    label: "en".to_string(),
+                    title: "First Title".to_string(),
+                },
+            ]
+        );
+        fixture.close().await;
+    }
 }
+

@@ -113,9 +113,10 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
                   COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                            FROM (SELECT smg.GENRE AS GENRE
                                   FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
+                                  WHERE smg.SERIES_ID = s.ID
+                                  ORDER BY smg.rowid)), '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -187,9 +188,10 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
                   COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT DISTINCT smg.GENRE AS GENRE
+                            FROM (SELECT smg.GENRE AS GENRE
                                   FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID)), '') AS GENRES,
+                                  WHERE smg.SERIES_ID = s.ID
+                                  ORDER BY smg.rowid)), '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -407,4 +409,33 @@ mod tests {
         assert_eq!(summary.metadata_tags, vec!["Slice, Life"]);
         fixture.close().await;
     }
+
+    #[tokio::test]
+    async fn load_persisted_book_summaries_preserves_series_genre_insertion_order() {
+        let fixture = BootstrappedBookFixture::open("persisted-book-genre-order").await;
+        fixture.insert_library_series().await;
+        fixture.insert_series_metadata().await;
+        fixture.insert_book("book-1").await;
+        fixture.insert_book_metadata("book-1").await;
+
+        for genre in ["Zeta", "Alpha", "Zeta"] {
+            sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
+                .bind("series-1")
+                .bind(genre)
+                .execute(&fixture.pool)
+                .await
+                .expect("genre should be inserted");
+        }
+
+        let summaries = load_persisted_book_summaries(&fixture.pool, None)
+            .await
+            .expect("book summaries should load");
+        let summary = summaries
+            .first()
+            .expect("book summaries should include seeded book");
+
+        assert_eq!(summary.genres, vec!["Zeta", "Alpha", "Zeta"]);
+        fixture.close().await;
+    }
 }
+

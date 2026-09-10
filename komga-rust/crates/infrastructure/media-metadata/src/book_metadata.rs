@@ -66,7 +66,7 @@ async fn load_book_metadata(
     };
 
     let author_rows = sqlx::query(
-        "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY ROLE ASC, NAME ASC",
+        "SELECT NAME, ROLE FROM BOOK_METADATA_AUTHOR WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -74,7 +74,7 @@ async fn load_book_metadata(
     .context("query existing book metadata authors")?;
 
     let tag_rows = sqlx::query(
-        "SELECT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY TAG COLLATE NOCASE ASC",
+        "SELECT DISTINCT TAG FROM BOOK_METADATA_TAG WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -82,7 +82,7 @@ async fn load_book_metadata(
     .context("query existing book metadata tags")?;
 
     let link_rows = sqlx::query(
-        "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY LABEL COLLATE NOCASE ASC, URL ASC",
+        "SELECT LABEL, URL FROM BOOK_METADATA_LINK WHERE BOOK_ID = ? ORDER BY rowid ASC",
     )
     .bind(book_id)
     .fetch_all(pool)
@@ -247,4 +247,83 @@ async fn persist_book_metadata(
         .await
         .context("commit book metadata update tx")?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use komga_infrastructure_test_support::BootstrappedBookFixture;
+
+    #[tokio::test]
+    async fn load_book_metadata_preserves_author_tag_link_insertion_order() {
+        let fixture = BootstrappedBookFixture::open("book-metadata-order").await;
+        fixture.insert_library_series().await;
+        fixture.insert_book("book-1").await;
+        fixture.insert_book_metadata("book-1").await;
+
+        for (name, role) in [("Zed", "artist"), ("Alpha", "writer"), ("Zed", "artist")] {
+            sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
+                .bind("book-1")
+                .bind(name)
+                .bind(role)
+                .execute(&fixture.pool)
+                .await
+                .expect("book author should be inserted");
+        }
+        for tag in ["Omega", "Beta", "Omega"] {
+            sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
+                .bind("book-1")
+                .bind(tag)
+                .execute(&fixture.pool)
+                .await
+                .expect("book metadata tag should be inserted");
+        }
+        for (label, url) in [("Zed", "https://z.example"), ("Alpha", "https://a.example")] {
+            sqlx::query("INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) VALUES (?, ?, ?)")
+                .bind("book-1")
+                .bind(label)
+                .bind(url)
+                .execute(&fixture.pool)
+                .await
+                .expect("book metadata link should be inserted");
+        }
+
+        let metadata = load_book_metadata(&fixture.pool, "book-1")
+            .await
+            .expect("book metadata should load")
+            .expect("book metadata should exist");
+
+        assert_eq!(
+            metadata.authors,
+            vec![
+                BookMetadataAuthor {
+                    name: "Zed".to_string(),
+                    role: "artist".to_string(),
+                },
+                BookMetadataAuthor {
+                    name: "Alpha".to_string(),
+                    role: "writer".to_string(),
+                },
+                BookMetadataAuthor {
+                    name: "Zed".to_string(),
+                    role: "artist".to_string(),
+                },
+            ]
+        );
+        assert_eq!(metadata.tags, vec!["Omega", "Beta"]);
+        assert_eq!(
+            metadata.links,
+            vec![
+                BookMetadataLink {
+                    label: "Zed".to_string(),
+                    url: "https://z.example".to_string(),
+                },
+                BookMetadataLink {
+                    label: "Alpha".to_string(),
+                    url: "https://a.example".to_string(),
+                },
+            ]
+        );
+        fixture.close().await;
+    }
 }

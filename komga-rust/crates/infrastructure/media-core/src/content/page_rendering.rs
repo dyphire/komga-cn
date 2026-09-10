@@ -10,6 +10,7 @@ use komga_application::media_assets::{
     book_media_is_epub, book_media_is_pdf, book_media_is_rar_archive, book_media_is_single_image,
     book_media_is_zip_archive, content_type_from_filename, is_supported_page_image_file_name,
 };
+use komga_domain::discovery::compare_book_names;
 use lopdf::Document as PdfDocument;
 use pdfium_render::prelude::*;
 use zip::ZipArchive;
@@ -44,11 +45,13 @@ pub async fn resolve_book_page_bytes(
             )));
         }
     };
-    if media_path_is_directory {
-        candidates.push(media.file_path.join(&page.file_name));
-    }
-    if let Some(parent) = media.file_path.parent() {
-        candidates.push(parent.join(&page.file_name));
+    if !page.file_name.is_empty() {
+        if media_path_is_directory {
+            candidates.push(media.file_path.join(&page.file_name));
+        }
+        if let Some(parent) = media.file_path.parent() {
+            candidates.push(parent.join(&page.file_name));
+        }
     }
     if book_media_is_single_image(media) && page_number == 1 {
         candidates.push(media.file_path.clone());
@@ -516,9 +519,9 @@ async fn read_zip_archive_page_bytes(
         let target_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
             anyhow::anyhow!(error).context(format!("convert zip page number {page_number}"))
         })?;
-        let mut logical_index = 0usize;
+        let mut supported = Vec::new();
         for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).map_err(|error| {
+            let entry = archive.by_index(index).map_err(|error| {
                 anyhow::anyhow!(error).context(format!(
                     "read zip archive entry #{index} from '{}': ",
                     path.display()
@@ -536,21 +539,26 @@ async fn read_zip_archive_page_bytes(
             if !is_supported_page_image_file_name(&entry_name) {
                 continue;
             }
-            if logical_index != target_index {
-                logical_index += 1;
-                continue;
-            }
-            let mut bytes = Vec::new();
-            entry.read_to_end(&mut bytes).map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "read zip archive entry '{}' from '{}': ",
-                    entry_name,
-                    path.display()
-                ))
-            })?;
-            return Ok(Some(bytes));
+            supported.push(entry_name);
         }
-        Ok(None)
+        supported.sort_by(|left, right| compare_book_names(left, right));
+        let Some(entry_name) = supported.get(target_index).map(|name| name.as_str()) else {
+            return Ok(None);
+        };
+        let mut entry = archive.by_name(entry_name).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "read zip archive entry '{entry_name}' from '{}': ",
+                path.display()
+            ))
+        })?;
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "read zip archive entry '{entry_name}' from '{}': ",
+                path.display()
+            ))
+        })?;
+        Ok(Some(bytes))
     })
     .await
     .context("join zip archive page read task")?
@@ -603,6 +611,10 @@ async fn load_zip_archive_page_rows(
                 file_size: entry.size().try_into().unwrap_or(i64::MAX),
             });
         }
+        rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
+        for (index, row) in rows.iter_mut().enumerate() {
+            row.number = (index as u64) + 1;
+        }
         Ok((!rows.is_empty()).then_some(rows))
     })
     .await
@@ -631,6 +643,11 @@ fn load_rar_archive_page_rows(
             file_size: entry.unpacked_size.try_into().unwrap_or(i64::MAX),
         })
         .collect::<Vec<_>>();
+    let mut rows = rows;
+    rows.sort_by(|left, right| compare_book_names(&left.file_name, &right.file_name));
+    for (index, row) in rows.iter_mut().enumerate() {
+        row.number = (index as u64) + 1;
+    }
     Ok((!rows.is_empty()).then_some(rows))
 }
 
@@ -1046,6 +1063,53 @@ mod tests {
             .await
             .expect("zip page bytes should read");
         assert_eq!(bytes, Some(b"page-2".to_vec()));
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn resolve_book_page_bytes_fallback_matches_sorted_rows_for_unsorted_archive() {
+        let file_path = unique_temp_path("komga-media-zip-unsorted");
+        let archive = build_test_zip_archive(vec![
+            ("002.png".to_string(), b"page-2".to_vec()),
+            ("001.jpg".to_string(), b"page-1".to_vec()),
+        ])
+        .expect("zip payload should be created");
+        fs::write(&file_path, archive).expect("zip test file should be written");
+
+        let media = BookMediaRecord {
+            library_id: "lib".to_string(),
+            file_name: "book.cbz".to_string(),
+            file_path: file_path.clone(),
+            media_type: "application/vnd.comicbook+zip".to_string(),
+            page_count: 2,
+        };
+        let page = BookPageRecord {
+            number: 1,
+            file_name: "not-present.jpg".to_string(),
+            media_type: "image/jpeg".to_string(),
+            width: None,
+            height: None,
+            file_size: 0,
+        };
+
+        let bytes = resolve_book_page_bytes(&media, &page, 1)
+            .await
+            .expect("zip page bytes should read");
+        assert_eq!(bytes, Some(b"page-1".to_vec()));
+
+        let page2 = BookPageRecord {
+            number: 2,
+            file_name: String::new(),
+            media_type: "image/jpeg".to_string(),
+            width: None,
+            height: None,
+            file_size: 0,
+        };
+        let bytes2 = resolve_book_page_bytes(&media, &page2, 2)
+            .await
+            .expect("zip page bytes should read");
+        assert_eq!(bytes2, Some(b"page-2".to_vec()));
 
         let _ = fs::remove_file(file_path);
     }

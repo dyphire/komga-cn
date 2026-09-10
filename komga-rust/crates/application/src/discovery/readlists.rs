@@ -2,15 +2,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::random_tokens::random_hex_token;
 use crate::runtime_sse::{RuntimeSseEvent, RuntimeSseEventSink};
-use icu::collator::{
-    Collator,
-    options::{CollatorOptions, Strength},
-};
-use icu::locale::locale;
 use komga_domain::common_ids::LibraryId;
 use komga_domain::discovery::{
     DiscoveryError, DiscoveryQueryContext, MediaStatus, PageEnvelope, ReadStatus,
-    content_allowed_by_restrictions,
+    compare_book_names, content_allowed_by_restrictions,
 };
 use quick_xml::Reader as XmlReader;
 use quick_xml::XmlVersion;
@@ -1098,21 +1093,13 @@ fn sort_readlists(
 }
 
 fn sort_readlists_by_name(content: &mut [ReadListReadModel], descending: bool) {
-    let collator = readlists_unicode_collator();
     content.sort_by(|left, right| {
         if descending {
-            collator.compare(right.name.as_str(), left.name.as_str())
+            compare_book_names(right.name.as_str(), left.name.as_str())
         } else {
-            collator.compare(left.name.as_str(), right.name.as_str())
+            compare_book_names(left.name.as_str(), right.name.as_str())
         }
     });
-}
-
-fn readlists_unicode_collator() -> icu::collator::CollatorBorrowed<'static> {
-    let mut options = CollatorOptions::default();
-    options.strength = Some(Strength::Tertiary);
-    Collator::try_new(locale!("und").into(), options)
-        .expect("unicode collator for readlists sorting should construct")
 }
 
 fn paginate_readlists(

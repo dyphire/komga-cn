@@ -438,8 +438,7 @@ JOIN SERIES s ON s.ID = sm.SERIES_ID
 WHERE sm.PUBLISHER IS NOT NULL
     AND trim(sm.PUBLISHER) != ''
     AND s.DELETED_DATE IS NULL
-    AND (? IS NULL OR s.LIBRARY_ID = ?)
-ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
+    AND (? IS NULL OR s.LIBRARY_ID = ?)"#,
     )
     .bind(library_id)
     .bind(library_id)
@@ -459,6 +458,11 @@ ORDER BY lower(sm.PUBLISHER), sm.PUBLISHER"#,
         }
         navigation.push(BrowsePublisherEntry { publisher });
     }
+
+    navigation.sort_by(|left, right| {
+        komga_domain::discovery::system_locale_collator()
+            .compare(&left.publisher, &right.publisher)
+    });
 
     Ok(navigation)
 }
@@ -1043,13 +1047,7 @@ OFFSET ?"#,
             age_rating: row
                 .get::<Option<i64>, _>("AGE_RATING")
                 .map(clamp_kotlin_int_u32),
-            sharing_labels: row
-                .get::<String, _>("SHARING_LABELS")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect(),
+            sharing_labels: parsed_sharing_labels(&row),
             last_modified: row.get::<String, _>("LAST_MODIFIED"),
         })
         .collect())
