@@ -641,6 +641,58 @@ fn search_multilingual_fields_match_accent_folded_queries() {
 }
 
 #[test]
+fn search_matches_digit_prefixed_cjk_boundary_queries() {
+    let index_dir = temp_index_dir("search-digit-prefixed-cjk-boundary-queries");
+    let index =
+        SearchIndexLifecycle::bootstrap(index_dir.as_path()).expect("index bootstrap should work");
+
+    index
+        .rebuild(&[
+            SearchDocument {
+                entity_type: SearchEntityType::Series,
+                id: "series-1".to_string(),
+                title: "3月的狮子".to_string(),
+                fields: vec![],
+            },
+            SearchDocument {
+                entity_type: SearchEntityType::Series,
+                id: "series-2".to_string(),
+                title: "狮子王".to_string(),
+                fields: vec![],
+            },
+            SearchDocument {
+                entity_type: SearchEntityType::Series,
+                id: "series-3".to_string(),
+                title: "3月のライオン".to_string(),
+                fields: vec![],
+            },
+        ])
+        .expect("index rebuild should insert digit-prefixed CJK fixtures");
+
+    let ids = index
+        .search_ids("3月", SearchEntityType::Series, 10)
+        .expect("digit-prefixed CJK query should execute");
+
+    assert_eq!(
+        ids,
+        vec!["series-1".to_string(), "series-3".to_string()],
+        "query '3月' should match via the boundary unigram '月' indexed for titles starting with digit + CJK",
+    );
+
+    let ids = index
+        .search_ids("3月のライオン", SearchEntityType::Series, 10)
+        .expect("full digit-prefixed CJK query should execute");
+
+    assert_eq!(
+        ids,
+        vec!["series-3".to_string()],
+        "full-title queries should still match exactly after boundary unigram indexing",
+    );
+
+    let _ = std::fs::remove_dir_all(index_dir);
+}
+
+#[test]
 fn search_preserves_mixed_latin_cjk_queries() {
     let index_dir = temp_index_dir("search-preserves-mixed-latin-cjk-queries");
     let index =
