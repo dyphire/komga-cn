@@ -381,6 +381,17 @@ pub trait ContentResolverPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>>;
 
+    /// Off-thread variant so callers never run PDF load+rewrite on an async
+    /// worker. Default implementation stays synchronous; production resolvers
+    /// override it with spawn_blocking.
+    async fn read_pdf_page_as_single_page_pdf_off_thread(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.read_pdf_page_as_single_page_pdf(media, page_number)
+    }
+
     fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()
             .with_context(|| format!("check media file existence '{}'", path.display()))
@@ -414,6 +425,18 @@ pub trait ContentResolverPort: Send + Sync {
             return Ok(Some(bytes.to_vec()));
         }
         Ok(None)
+    }
+
+    /// Off-thread variant so callers never run image decode+encode on an async
+    /// worker. Default implementation stays synchronous; production resolvers
+    /// override it with spawn_blocking.
+    async fn convert_image_bytes_off_thread(
+        &self,
+        bytes: Vec<u8>,
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.convert_image_bytes(&bytes, source_content_type, target_content_type)
     }
 
     async fn read_epub_resource_bytes(

@@ -179,6 +179,14 @@ impl BookMediaContentPort for TestBookMediaContent {
         clone_result(&self.pdf_page_bytes)
     }
 
+    async fn read_pdf_page_as_single_page_pdf_off_thread(
+        &self,
+        media: &super::BookMediaRecord,
+        page_number: u64,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.read_pdf_page_as_single_page_pdf(media, page_number)
+    }
+
     fn media_file_exists(&self, _path: &Path) -> anyhow::Result<bool> {
         clone_result(&self.media_file_exists)
     }
@@ -208,6 +216,15 @@ impl BookMediaContentPort for TestBookMediaContent {
             return Ok(Some(bytes.to_vec()));
         }
         clone_result(&self.converted_image_bytes)
+    }
+
+    async fn convert_image_bytes_off_thread(
+        &self,
+        bytes: Vec<u8>,
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        self.convert_image_bytes(&bytes, source_content_type, target_content_type)
     }
 
     async fn epub_cover_bytes(

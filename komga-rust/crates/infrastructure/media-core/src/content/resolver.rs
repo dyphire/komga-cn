@@ -78,6 +78,20 @@ impl ContentResolverPort for ContentResolver {
         page_content::read_pdf_page_as_single_page_pdf(media, page_number)
     }
 
+    async fn read_pdf_page_as_single_page_pdf_off_thread(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let this = self.clone();
+        let media = media.clone();
+        tokio::task::spawn_blocking(move || {
+            this.read_pdf_page_as_single_page_pdf(&media, page_number)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("join pdf single-page export task: {error}"))?
+    }
+
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
         page_content::read_media_file_bytes(path).await
     }
@@ -107,6 +121,22 @@ impl ContentResolverPort for ContentResolver {
         target_content_type: &str,
     ) -> anyhow::Result<Option<Vec<u8>>> {
         page_content::convert_image_bytes(bytes, source_content_type, target_content_type)
+    }
+
+    async fn convert_image_bytes_off_thread(
+        &self,
+        bytes: Vec<u8>,
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let this = self.clone();
+        let source_content_type = source_content_type.to_owned();
+        let target_content_type = target_content_type.to_owned();
+        tokio::task::spawn_blocking(move || {
+            this.convert_image_bytes(&bytes, &source_content_type, &target_content_type)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("join image convert task: {error}"))?
     }
 
     // --- EPUB ---

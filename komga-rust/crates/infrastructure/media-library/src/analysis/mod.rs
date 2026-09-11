@@ -627,6 +627,59 @@ fn analyze_zip_media_pages(
         }
         files.push(file_name.clone());
         let file_size = i64::try_from(entry.size()).ok();
+
+        let media_type_from_name = media_type_from_entry_name(&file_name);
+        let is_known_image = matches!(
+            extension(&file_name).as_deref().map(|ext| ext.to_ascii_lowercase()).as_deref(),
+            Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "bmp" | "svg")
+        );
+        let needs_content_detection = !is_known_image && media_type_from_name == "application/octet-stream";
+
+        if !is_known_image && !needs_content_detection {
+            media_files.push(AnalyzedMediaFile {
+                file_name,
+                media_type: Some(media_type_from_name),
+                sub_type: None,
+                file_size,
+            });
+            continue;
+        }
+
+        if is_known_image {
+            if !profile.include_dimensions() {
+                pages.push(AnalyzedMediaPage {
+                    media_type: media_type_from_name,
+                    file_name,
+                    width: None,
+                    height: None,
+                    file_size: file_size.unwrap_or(i64::MAX),
+                });
+                continue;
+            }
+            match image_dimensions_from_reader(&mut entry) {
+                Ok(Some(dimensions)) => {
+                    let dimensions = analyzed_media_page_dimensions(Some(dimensions));
+                    pages.push(AnalyzedMediaPage {
+                        media_type: media_type_from_name,
+                        file_name,
+                        width: dimensions.width,
+                        height: dimensions.height,
+                        file_size: file_size.unwrap_or(i64::MAX),
+                    });
+                }
+                Ok(None) | Err(_) => {
+                    entry_errors.push(file_name.clone());
+                    media_files.push(AnalyzedMediaFile {
+                        file_name,
+                        media_type: None,
+                        sub_type: None,
+                        file_size: None,
+                    });
+                }
+            }
+            continue;
+        }
+
         let entry_prefix = match read_archive_entry_prefix(&mut entry) {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -641,8 +694,7 @@ fn analyze_zip_media_pages(
             }
         };
         let media_type = media_type_from_entry_bytes(&file_name, &entry_prefix);
-        let is_page = media_type.starts_with("image/");
-        if !is_page {
+        if !media_type.starts_with("image/") {
             media_files.push(AnalyzedMediaFile {
                 file_name,
                 media_type: Some(media_type),
@@ -652,13 +704,12 @@ fn analyze_zip_media_pages(
             continue;
         }
 
-        let dimensions = if profile.include_dimensions() && media_type.starts_with("image/") {
+        let dimensions = if profile.include_dimensions() {
             image_dimensions_from_bytes_i64(&entry_prefix)
         } else {
             None
         };
-        if profile.include_dimensions() && media_type.starts_with("image/") && dimensions.is_none()
-        {
+        if profile.include_dimensions() && dimensions.is_none() {
             entry_errors.push(file_name.clone());
             media_files.push(AnalyzedMediaFile {
                 file_name,
@@ -705,6 +756,23 @@ fn analyze_epub_media_pages(
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
     let analysis = analyze_epub_file(file_path)
         .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
+    let mut archive = if profile.include_dimensions() {
+        let file = std::fs::File::open(file_path).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "open EPUB for dimensions '{}': ",
+                file_path.display()
+            ))
+        })?;
+        Some(zip::ZipArchive::new(file).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "open EPUB archive for dimensions '{}': ",
+                file_path.display()
+            ))
+        })?)
+    } else {
+        None
+    };
+
     let pages = analysis
         .pages
         .into_iter()
@@ -712,8 +780,11 @@ fn analyze_epub_media_pages(
             let dimensions = if profile.include_dimensions()
                 && page.media_type.starts_with("image/")
             {
+                let archive = archive
+                    .as_mut()
+                    .expect("EPUB archive is opened when dimensions are enabled");
                 Some(
-                    read_epub_image_dimensions(file_path, &page.file_name)?.ok_or_else(|| {
+                    read_epub_image_dimensions(archive, &page.file_name)?.ok_or_else(|| {
                         anyhow::anyhow!(format!(
                             "decode EPUB image dimensions for '{}'",
                             page.file_name
@@ -756,19 +827,10 @@ fn analyze_epub_media_pages(
     })
 }
 
-fn read_epub_image_dimensions(
-    file_path: &Path,
+fn read_epub_image_dimensions<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
     file_name: &str,
 ) -> anyhow::Result<Option<MediaDimensions>> {
-    let file = std::fs::File::open(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open EPUB image '{}': ", file_path.display()))
-    })?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "open EPUB image archive '{}': ",
-            file_path.display()
-        ))
-    })?;
     let mut entry = archive.by_name(file_name).map_err(|error| {
         anyhow::anyhow!(error).context(format!("read EPUB image '{file_name}'"))
     })?;
@@ -1060,9 +1122,7 @@ fn detected_media_type_from_path(path: &Path) -> anyhow::Result<String> {
         return Ok(MOBI_MEDIA_TYPE.to_string());
     }
 
-    if let Ok(file) = std::fs::File::open(path)
-        && let Ok(mut archive) = zip::ZipArchive::new(file)
-    {
+    if let Ok(mut archive) = zip::ZipArchive::new(file) {
         return Ok(detect_epub_media_type_from_archive(&mut archive).to_string());
     }
 
