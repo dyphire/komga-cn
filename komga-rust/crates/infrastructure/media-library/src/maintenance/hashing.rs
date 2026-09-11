@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use komga_application::task_processing::TaskProcessingError;
 use sha2::{Digest, Sha256};
 use tokio::fs;
+use tokio::io::AsyncReadExt;
 
 use super::hashed_pages::HashedPageToDelete;
 use super::library_flags::load_library_hashing_flags;
@@ -81,15 +82,27 @@ pub async fn hash_book(
         return Ok(());
     };
 
-    let bytes = fs::read(&file_path).await.map_err(|error| {
+    let mut file = fs::File::open(&file_path).await.map_err(|error| {
         TaskProcessingError::runtime(format!(
-            "failed to read book file for hash task '{}': {error}",
+            "failed to open book file for hash task '{}': {error}",
             file_path.display(),
         ))
     })?;
 
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).await.map_err(|error| {
+            TaskProcessingError::runtime(format!(
+                "failed to read book file for hash task '{}': {error}",
+                file_path.display(),
+            ))
+        })?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     let digest = hasher.finalize();
     let hash = digest
         .iter()

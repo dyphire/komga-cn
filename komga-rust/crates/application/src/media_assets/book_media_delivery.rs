@@ -219,6 +219,12 @@ pub trait BookMediaContentPort: Send + Sync {
         page_number: u64,
     ) -> anyhow::Result<Option<Vec<u8>>>;
 
+    async fn read_pdf_page_as_single_page_pdf_off_thread(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+    ) -> anyhow::Result<Option<Vec<u8>>>;
+
     fn media_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
         path.try_exists()
             .with_context(|| format!("check media file existence '{}'", path.display()))
@@ -236,6 +242,13 @@ pub trait BookMediaContentPort: Send + Sync {
     fn convert_image_bytes(
         &self,
         bytes: &[u8],
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> anyhow::Result<Option<Vec<u8>>>;
+
+    async fn convert_image_bytes_off_thread(
+        &self,
+        bytes: Vec<u8>,
         source_content_type: &str,
         target_content_type: &str,
     ) -> anyhow::Result<Option<Vec<u8>>>;
@@ -319,6 +332,19 @@ where
         ContentResolverPort::read_pdf_page_as_single_page_pdf(self, media, page_number)
     }
 
+    async fn read_pdf_page_as_single_page_pdf_off_thread(
+        &self,
+        media: &BookMediaRecord,
+        page_number: u64,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        ContentResolverPort::read_pdf_page_as_single_page_pdf_off_thread(
+            self,
+            media,
+            page_number,
+        )
+        .await
+    }
+
     async fn read_media_file_bytes(&self, path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
         ContentResolverPort::read_media_file_bytes(self, path).await
     }
@@ -346,6 +372,21 @@ where
             source_content_type,
             target_content_type,
         )
+    }
+
+    async fn convert_image_bytes_off_thread(
+        &self,
+        bytes: Vec<u8>,
+        source_content_type: &str,
+        target_content_type: &str,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        ContentResolverPort::convert_image_bytes_off_thread(
+            self,
+            bytes,
+            source_content_type,
+            target_content_type,
+        )
+        .await
     }
 
     async fn epub_cover_bytes(
@@ -469,11 +510,14 @@ where
                 Ok(None) => return page_number_does_not_exist(),
                 Err(error) => return BookMediaDelivery::Internal(error),
             };
-            let content = match self.resolve_page_content(
-                rendered.bytes,
-                rendered.format.content_type(),
-                requested_convert,
-            ) {
+            let content = match self
+                .resolve_page_content(
+                    rendered.bytes,
+                    rendered.format.content_type(),
+                    requested_convert,
+                )
+                .await
+            {
                 Ok(content) => content,
                 Err(delivery) => return delivery,
             };
@@ -505,7 +549,10 @@ where
             Err(error) => return BookMediaDelivery::Internal(error),
         };
         let content_type = page_row_media_type(&page_row, &media);
-        let content = match self.resolve_page_content(bytes, &content_type, requested_convert) {
+        let content = match self
+            .resolve_page_content(bytes, &content_type, requested_convert)
+            .await
+        {
             Ok(content) => content,
             Err(delivery) => return delivery,
         };
@@ -744,7 +791,7 @@ where
         Ok(context.content_allowed(restrictions.age_rating, &restrictions.labels))
     }
 
-    fn resolve_page_content(
+    async fn resolve_page_content(
         &self,
         bytes: Vec<u8>,
         source_content_type: &str,
@@ -761,7 +808,12 @@ where
         let converted =
             match self
                 .content
-                .convert_image_bytes(&bytes, source_content_type, target_content_type)
+                .convert_image_bytes_off_thread(
+                    bytes,
+                    source_content_type,
+                    target_content_type,
+                )
+                .await
             {
                 Ok(Some(converted)) => converted,
                 Ok(None) => return Err(BookMediaDelivery::NotFound),
@@ -779,7 +831,8 @@ where
         }
         let bytes = match self
             .content
-            .read_pdf_page_as_single_page_pdf(media, page_number)
+            .read_pdf_page_as_single_page_pdf_off_thread(media, page_number)
+            .await
         {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return page_number_does_not_exist(),
