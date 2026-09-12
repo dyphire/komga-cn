@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
+
+use sqlx::Row;
 
 use crate::persisted::{facets, library_mappings, runtime_queries};
 use crate::records as persisted_models;
@@ -26,10 +28,10 @@ mod series_queries;
 mod sql_pushdown;
 
 use models::{
-    BooksFilterCriteria, PersistedBookPosterSummary, PersistedBookSummary,
-    PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedReadProgressSummary,
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
-    PersistedWebLinkEntry, SeriesFilterCriteria,
+    BooksFilterCriteria, LightweightBookSortRow, LightweightSeriesSortRow,
+    PersistedBookPosterSummary, PersistedBookSummary, PersistedBooksBrowseQuery,
+    PersistedBooksSortMode, PersistedReadProgressSummary, PersistedSeriesBrowseQuery,
+    PersistedSeriesSortMode, PersistedSeriesSummary, PersistedWebLinkEntry, SeriesFilterCriteria,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -456,10 +458,6 @@ impl SqliteDiscoveryBrowseService {
         series::load_persisted_series_count(self.db.read_pool()).await
     }
 
-    async fn search_book_ids(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
-        self.search.search_ids(query, SearchEntityType::Book, limit)
-    }
-
     async fn search_series_scored_ids(
         &self,
         query: &str,
@@ -473,6 +471,270 @@ impl SqliteDiscoveryBrowseService {
                 score: hit.score,
                 id: hit.id,
             })
+            .collect())
+    }
+
+    async fn search_book_ids(&self, query: &str, limit: usize) -> anyhow::Result<Vec<String>> {
+        self.search.search_ids(query, SearchEntityType::Book, limit)
+    }
+
+    async fn load_book_sort_rows(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<HashMap<String, LightweightBookSortRow>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT b.ID, b.NAME, \
+             COALESCE(bm.TITLE, b.NAME) AS TITLE, \
+             COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS SERIES_TITLE_SORT, \
+             b.URL, \
+             b.CREATED_DATE, \
+             b.LAST_MODIFIED_DATE, \
+             b.SERIES_ID, \
+             b.LIBRARY_ID, \
+             b.DELETED_DATE, \
+             s.ONESHOT AS ONESHOT, \
+             sm.LANGUAGE, \
+             sm.PUBLISHER, \
+             sm.AGE_RATING, \
+             COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS NUMBER_SORT, \
+             b.FILE_HASH, bm.RELEASE_DATE, \
+             COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS, \
+             COALESCE(m.COMMENT, '') AS MEDIA_COMMENT, \
+             COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE, \
+             COALESCE(m.PAGE_COUNT, 0) AS MEDIA_PAGES_COUNT \
+             FROM BOOK b \
+             JOIN SERIES s ON s.ID = b.SERIES_ID \
+             LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+             LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID \
+             WHERE b.ID IN (",
+        );
+        let mut separated = query.separated(",");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.read_pool())
+            .await
+            .map_err(anyhow::Error::from)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("ID"),
+                    LightweightBookSortRow {
+                        name: row.get("NAME"),
+                        title: row.get("TITLE"),
+                        series_title_sort: row.get("SERIES_TITLE_SORT"),
+                        url: row.get("URL"),
+                        created_date: row.get("CREATED_DATE"),
+                        last_modified_date: row.get("LAST_MODIFIED_DATE"),
+                        series_id: row.get("SERIES_ID"),
+                        library_id: row.get("LIBRARY_ID"),
+                        deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
+                        oneshot: row.get::<i64, _>("ONESHOT") != 0,
+                        language: row.get::<Option<String>, _>("LANGUAGE"),
+                        publisher: row.get::<Option<String>, _>("PUBLISHER"),
+                        age_rating: row
+                            .get::<Option<i64>, _>("AGE_RATING")
+                            .map(|value| value as u32),
+                        number_sort: row.get("NUMBER_SORT"),
+                                            file_hash: row.get("FILE_HASH"),
+                        release_date: row.get("RELEASE_DATE"),
+                        media_status: row.get("MEDIA_STATUS"),
+                        media_comment: row.get("MEDIA_COMMENT"),
+                        media_type: row.get("MEDIA_TYPE"),
+                        media_pages_count: row.get("MEDIA_PAGES_COUNT"),
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn search_book_scored_ids(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<ScoredSearchHit>> {
+        Ok(self
+            .search
+            .search_scored_ids(query, SearchEntityType::Book, limit)?
+            .into_iter()
+            .map(|hit| ScoredSearchHit {
+                score: hit.score,
+                id: hit.id,
+            })
+            .collect())
+    }
+
+    async fn load_book_titles(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<HashMap<String, String>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT b.ID, \
+             COALESCE(bm.TITLE, b.NAME) AS TITLE \
+             FROM BOOK b \
+             LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID \
+             WHERE b.ID IN (",
+        );
+        let mut separated = query.separated(",");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.read_pool())
+            .await
+            .map_err(anyhow::Error::from)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get("ID"), row.get("TITLE")))
+            .collect())
+    }
+
+    async fn load_series_names(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<HashMap<String, String>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT s.ID, \
+             COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS NAME \
+             FROM SERIES s \
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+             WHERE s.ID IN (",
+        );
+        let mut separated = query.separated(",");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.read_pool())
+            .await
+            .map_err(anyhow::Error::from)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get("ID"), row.get("NAME")))
+            .collect())
+    }
+
+    async fn load_series_sort_rows(
+        &self,
+        ids: &[String],
+    ) -> anyhow::Result<HashMap<String, LightweightSeriesSortRow>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT s.ID, \
+             s.NAME, \
+             COALESCE(sm.TITLE, s.NAME) AS TITLE, \
+             COALESCE(sm.TITLE_SORT, sm.TITLE, s.NAME) AS TITLE_SORT, \
+             s.URL, \
+             s.CREATED_DATE, \
+             s.LAST_MODIFIED_DATE, \
+             s.LIBRARY_ID, \
+             s.DELETED_DATE, \
+             s.ONESHOT AS ONESHOT, \
+             s.BOOK_COUNT, \
+             COALESCE(sm.LANGUAGE, '') AS LANGUAGE, \
+             COALESCE(sm.PUBLISHER, '') AS PUBLISHER, \
+             sm.AGE_RATING AS AGE_RATING, \
+             COALESCE(sm.STATUS, 'ONGOING') AS STATUS, \
+             bma.RELEASE_DATE AS RELEASE_DATE \
+             FROM SERIES s \
+             LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID \
+             LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID \
+             WHERE s.ID IN (",
+        );
+        let mut separated = query.separated(",");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.read_pool())
+            .await
+            .map_err(anyhow::Error::from)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("ID"),
+                    LightweightSeriesSortRow {
+                        name: row.get("NAME"),
+                        title: row.get("TITLE"),
+                        title_sort: row.get("TITLE_SORT"),
+                        url: row.get("URL"),
+                        created_date: row.get("CREATED_DATE"),
+                        last_modified_date: row.get("LAST_MODIFIED_DATE"),
+                        library_id: row.get("LIBRARY_ID"),
+                        deleted: row.get::<Option<String>, _>("DELETED_DATE").is_some(),
+                        oneshot: row.get::<i64, _>("ONESHOT") != 0,
+                        language: row.get("LANGUAGE"),
+                        publisher: row.get("PUBLISHER"),
+                        age_rating: row
+                            .get::<Option<i64>, _>("AGE_RATING")
+                            .map(|value| value as u32),
+                        status: row.get("STATUS"),
+                        books_count: row.get::<i64, _>("BOOK_COUNT").max(0) as u64,
+                        release_date: row.get::<Option<String>, _>("RELEASE_DATE"),
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn filter_scored_book_ids_by_library(
+        &self,
+        hits: &[ScoredSearchHit],
+        library_ids: &[String],
+    ) -> anyhow::Result<Vec<ScoredSearchHit>> {
+        if hits.is_empty() || library_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT ID, LIBRARY_ID FROM BOOK WHERE ID IN (",
+        );
+        let mut separated = query.separated(",");
+        for id in &ids {
+            separated.push_bind(*id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.read_pool())
+            .await
+            .map_err(anyhow::Error::from)?;
+        let library_set: HashSet<&str> = library_ids.iter().map(String::as_str).collect();
+        let matched_ids: HashSet<String> = rows
+            .into_iter()
+            .filter(|row| {
+                let library_id: String = row.get("LIBRARY_ID");
+                library_set.contains(library_id.as_str())
+            })
+            .map(|row| row.get::<String, _>("ID"))
+            .collect();
+        Ok(hits
+            .iter()
+            .filter(|hit| matched_ids.contains(hit.id.as_str()))
+            .cloned()
             .collect())
     }
 }

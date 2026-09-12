@@ -138,6 +138,49 @@ pub(super) struct BooksFilterCriteria {
     pub(super) library_ids: Option<Vec<String>>,
 }
 
+#[derive(Clone)]
+pub(super) struct LightweightBookSortRow {
+    pub(super) name: String,
+    pub(super) title: String,
+    pub(super) series_title_sort: String,
+    pub(super) url: String,
+    pub(super) created_date: String,
+    pub(super) last_modified_date: String,
+    pub(super) series_id: String,
+    pub(super) library_id: String,
+    pub(super) deleted: bool,
+    pub(super) oneshot: bool,
+    pub(super) language: Option<String>,
+    pub(super) publisher: Option<String>,
+    pub(super) age_rating: Option<u32>,
+    pub(super) number_sort: f64,
+    pub(super) file_hash: String,
+    pub(super) release_date: Option<String>,
+    pub(super) media_status: String,
+    pub(super) media_comment: String,
+    pub(super) media_type: String,
+    pub(super) media_pages_count: i64,
+}
+
+#[derive(Clone)]
+pub(super) struct LightweightSeriesSortRow {
+    pub(super) name: String,
+    pub(super) title: String,
+    pub(super) title_sort: String,
+    pub(super) url: String,
+    pub(super) created_date: String,
+    pub(super) last_modified_date: String,
+    pub(super) library_id: String,
+    pub(super) deleted: bool,
+    pub(super) oneshot: bool,
+    pub(super) language: String,
+    pub(super) publisher: String,
+    pub(super) age_rating: Option<u32>,
+    pub(super) status: String,
+    pub(super) books_count: u64,
+    pub(super) release_date: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PersistedBooksSortMode {
     TitleAsc,

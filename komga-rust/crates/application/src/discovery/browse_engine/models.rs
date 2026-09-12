@@ -36,7 +36,7 @@ pub struct BookPosterRow {
     pub selected: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct BookRow {
     pub id: String,
     pub series_id: String,
@@ -87,7 +87,7 @@ pub struct BookRow {
     pub metadata_links: Vec<WebLinkEntry>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SeriesRow {
     pub id: String,
     pub library_id: String,

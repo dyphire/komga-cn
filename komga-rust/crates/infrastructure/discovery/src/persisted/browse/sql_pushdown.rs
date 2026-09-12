@@ -19,8 +19,8 @@ use komga_domain::discovery::{
 use sqlx::{Row, Sqlite, SqlitePool};
 
 use super::models::{
-    BooksFilterCriteria, PersistedBooksBrowseQuery, PersistedBooksSortMode,
-    PersistedSeriesBrowseQuery, PersistedSeriesSortMode,
+    PersistedBooksBrowseQuery, PersistedBooksSortMode, PersistedSeriesBrowseQuery,
+    PersistedSeriesSortMode,
 };
 use super::{DiscoveryQueryContext, SqliteDiscoveryBrowseService};
 
@@ -1915,10 +1915,265 @@ pub(super) async fn try_load_books_page(
         total_elements,
     }))
 }
+/// Search fast-path replacement: tantivy candidate IDs become chunked
+/// `b.ID IN (...)` predicates so condition filtering, restrictions,
+/// non-Relevance ordering and pagination all happen in SQL. Returns None
+/// only when a condition/sort cannot be translated (caller falls back).
+pub(super) async fn try_load_search_books_page(
+    backend: &SqliteDiscoveryBrowseService,
+    context: &DiscoveryQueryContext,
+    query: &PersistedBooksBrowseQuery,
+    candidate_ids: &[String],
+    sort_in_sql: bool,
+) -> anyhow::Result<Option<SqlPage>> {
+    if candidate_ids.is_empty() {
+        return Ok(Some(SqlPage {
+            ids: Vec::new(),
+            total_elements: 0,
+        }));
+    }
+    let user_id = context.user_id.as_deref();
+    let cutoffs = match &query.condition {
+        Some(condition) => {
+            let mut cutoffs = HashMap::new();
+            for days in collect_book_release_date_offsets(condition) {
+                cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
+            }
+            cutoffs
+        }
+        None => HashMap::new(),
+    };
+    let condition_expr = match &query.condition {
+        Some(condition) => match translate_book_condition(condition, user_id, &cutoffs) {
+            Some(expr) => Some(expr),
+            None => return Ok(None),
+        },
+        None => None,
+    };
+    let order = if sort_in_sql {
+        match books_order_by(query, user_id) {
+            Some(order) => order,
+            None => return Ok(None),
+        }
+    } else {
+        OrderSpec {
+            sql: String::new(),
+            rps_user: None,
+            collection_id: None,
+            rp_user: None,
+            readlist_id: None,
+        }
+    };
+
+    let pool = backend.db.read_pool();
+    let mut from_body =
+        "BOOK b JOIN SERIES s ON s.ID = b.SERIES_ID LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID"
+            .to_string();
+    let mut join_binds = Vec::<SqlBind>::new();
+    if let Some(user_id) = order.rp_user.as_deref() {
+        from_body.push_str(" LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID AND rp.USER_ID = ?");
+        join_binds.push(SqlBind::Text(user_id.to_string()));
+    }
+    if let Some(readlist_id) = order.readlist_id.as_deref() {
+        from_body.push_str(" LEFT JOIN READLIST_BOOK rb ON rb.BOOK_ID = b.ID AND rb.READLIST_ID = ?");
+        join_binds.push(SqlBind::Text(readlist_id.to_string()));
+    }
+
+    let mut where_sql = String::new();
+    let mut where_binds = Vec::<SqlBind>::new();
+    where_sql.push('(');
+    for (index, chunk) in candidate_ids.chunks(500).enumerate() {
+        if index > 0 {
+            where_sql.push_str(" OR ");
+        }
+        where_sql.push_str("b.ID IN (");
+        for (inner, id) in chunk.iter().enumerate() {
+            if inner > 0 {
+                where_sql.push_str(", ");
+            }
+            where_sql.push('?');
+            where_binds.push(SqlBind::Text(id.clone()));
+        }
+        where_sql.push(')');
+    }
+    where_sql.push(')');
+    if let Some(restrictions) = books_restrictions(context, query) {
+        where_sql.push_str(" AND ");
+        where_sql.push_str(&restrictions.sql);
+        where_binds.extend(restrictions.binds);
+    }
+    if let Some(condition) = condition_expr {
+        where_sql.push_str(" AND ");
+        where_sql.push_str(&condition.sql);
+        where_binds.extend(condition.binds);
+    }
+
+    let mut binds_all = Vec::new();
+    binds_all.extend(join_binds.iter().cloned());
+    binds_all.extend(where_binds.iter().cloned());
+
+    let total_elements = if sort_in_sql {
+        let count_sql = format!("SELECT COUNT(*) AS COUNT FROM (SELECT b.ID FROM {from_body} WHERE {where_sql})");
+        run_count(pool, &count_sql, &binds_all).await?
+    } else {
+        0
+    };
+
+    let mut page_sql = format!("SELECT b.ID FROM {from_body} WHERE {where_sql}");
+    if !order.sql.is_empty() {
+        page_sql.push_str(" ORDER BY ");
+        page_sql.push_str(&order.sql);
+    }
+    let mut page_binds = Vec::new();
+    page_binds.extend(join_binds.iter().cloned());
+    page_binds.extend(where_binds.iter().cloned());
+    if sort_in_sql {
+        if !query.unpaged {
+            page_sql.push_str(" LIMIT ? OFFSET ?");
+            page_binds.push(SqlBind::Int(query.size as i64));
+            page_binds.push(SqlBind::Int((query.page * query.size) as i64));
+        } else {
+            page_sql.push_str(" LIMIT -1");
+        }
+    }
+    let ids = run_ids(pool, &page_sql, &page_binds).await?;
+
+    Ok(Some(SqlPage {
+        ids,
+        total_elements,
+    }))
+}
+
+/// Series counterpart of `try_load_search_books_page`.
+pub(super) async fn try_load_search_series_page(
+    backend: &SqliteDiscoveryBrowseService,
+    context: &DiscoveryQueryContext,
+    query: &PersistedSeriesBrowseQuery,
+    candidate_ids: &[String],
+    sort_in_sql: bool,
+) -> anyhow::Result<Option<SqlPage>> {
+    if candidate_ids.is_empty() {
+        return Ok(Some(SqlPage {
+            ids: Vec::new(),
+            total_elements: 0,
+        }));
+    }
+    let user_id = context.user_id.as_deref();
+    let cutoffs = match &query.condition {
+        Some(condition) => {
+            let mut cutoffs = HashMap::new();
+            for days in collect_series_release_date_offsets(condition) {
+                cutoffs.insert(days, backend.persisted_utc_date_minus_days(days).await?);
+            }
+            cutoffs
+        }
+        None => HashMap::new(),
+    };
+    let condition_expr = match &query.condition {
+        Some(condition) => match translate_series_condition(condition, user_id, &cutoffs) {
+            Some(expr) => Some(expr),
+            None => return Ok(None),
+        },
+        None => None,
+    };
+    let order = if sort_in_sql {
+        match series_order_by(query, user_id) {
+            Some(order) => order,
+            None => return Ok(None),
+        }
+    } else {
+        OrderSpec {
+            sql: String::new(),
+            rps_user: None,
+            collection_id: None,
+            rp_user: None,
+            readlist_id: None,
+        }
+    };
+
+    let pool = backend.db.read_pool();
+    let mut from_body =
+        "SERIES s LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"
+            .to_string();
+    let mut join_binds = Vec::<SqlBind>::new();
+    if let Some(user_id) = order.rps_user.as_deref() {
+        from_body.push_str(" LEFT JOIN READ_PROGRESS_SERIES rps ON rps.SERIES_ID = s.ID AND rps.USER_ID = ?");
+        join_binds.push(SqlBind::Text(user_id.to_string()));
+    }
+    if let Some(collection_id) = order.collection_id.as_deref() {
+        from_body.push_str(" LEFT JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID AND cs.COLLECTION_ID = ?");
+        join_binds.push(SqlBind::Text(collection_id.to_string()));
+    }
+
+    let mut where_sql = String::new();
+    let mut where_binds = Vec::<SqlBind>::new();
+    where_sql.push('(');
+    for (index, chunk) in candidate_ids.chunks(500).enumerate() {
+        if index > 0 {
+            where_sql.push_str(" OR ");
+        }
+        where_sql.push_str("s.ID IN (");
+        for (inner, id) in chunk.iter().enumerate() {
+            if inner > 0 {
+                where_sql.push_str(", ");
+            }
+            where_sql.push('?');
+            where_binds.push(SqlBind::Text(id.clone()));
+        }
+        where_sql.push(')');
+    }
+    where_sql.push(')');
+    if let Some(restrictions) = series_restrictions(context) {
+        where_sql.push_str(" AND ");
+        where_sql.push_str(&restrictions.sql);
+        where_binds.extend(restrictions.binds);
+    }
+    if let Some(condition) = condition_expr {
+        where_sql.push_str(" AND ");
+        where_sql.push_str(&condition.sql);
+        where_binds.extend(condition.binds);
+    }
+
+    let mut binds_all = Vec::new();
+    binds_all.extend(join_binds.iter().cloned());
+    binds_all.extend(where_binds.iter().cloned());
+
+    let total_elements = if sort_in_sql {
+        let count_sql = format!("SELECT COUNT(*) AS COUNT FROM (SELECT s.ID FROM {from_body} WHERE {where_sql})");
+        run_count(pool, &count_sql, &binds_all).await?
+    } else {
+        0
+    };
+
+    let mut page_sql = format!("SELECT s.ID FROM {from_body} WHERE {where_sql}");
+    if !order.sql.is_empty() {
+        page_sql.push_str(" ORDER BY ");
+        page_sql.push_str(&order.sql);
+    }
+    let mut page_binds = Vec::new();
+    page_binds.extend(join_binds.iter().cloned());
+    page_binds.extend(where_binds.iter().cloned());
+    if sort_in_sql {
+        if !query.unpaged {
+            page_sql.push_str(" LIMIT ? OFFSET ?");
+            page_binds.push(SqlBind::Int(query.size as i64));
+            page_binds.push(SqlBind::Int((query.page * query.size) as i64));
+        } else {
+            page_sql.push_str(" LIMIT -1");
+        }
+    }
+    let ids = run_ids(pool, &page_sql, &page_binds).await?;
+
+    Ok(Some(SqlPage {
+        ids,
+        total_elements,
+    }))
+}
 
 #[cfg(test)]
 mod webui_pushdown_probe {
     use super::*;
+    use super::super::models::BooksFilterCriteria;
     use komga_domain::discovery::{CompositeBookCondition, ReadStatus};
 
     fn q(condition: BookCondition, sort: Vec<PersistedBooksSortMode>) -> PersistedBooksBrowseQuery {
