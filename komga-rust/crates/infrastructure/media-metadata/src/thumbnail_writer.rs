@@ -158,6 +158,35 @@ impl ThumbnailWriterPort for ThumbnailWriter {
         .await
     }
 
+    async fn insert_generated_readlist(
+        &self,
+        readlist_id: &str,
+        thumbnail: &[u8],
+        media_type: &str,
+        width: i64,
+        height: i64,
+    ) -> anyhow::Result<ReadlistThumbnailRecord> {
+        metadata::insert_generated_readlist_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            readlist_id,
+            thumbnail,
+            media_type,
+            width,
+            height,
+        )
+        .await
+    }
+
+    async fn delete_generated_readlist(&self, readlist_id: &str) -> anyhow::Result<bool> {
+        metadata::delete_generated_readlist_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            readlist_id,
+        )
+        .await
+    }
+
     // --- Collection ---
 
     async fn insert_collection(
@@ -201,6 +230,35 @@ impl ThumbnailWriterPort for ThumbnailWriter {
             self.runtime_events.as_ref(),
             collection_id,
             thumbnail_id,
+        )
+        .await
+    }
+
+    async fn insert_generated_collection(
+        &self,
+        collection_id: &str,
+        thumbnail: &[u8],
+        media_type: &str,
+        width: i64,
+        height: i64,
+    ) -> anyhow::Result<CollectionThumbnailRecord> {
+        metadata::insert_generated_collection_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            collection_id,
+            thumbnail,
+            media_type,
+            width,
+            height,
+        )
+        .await
+    }
+
+    async fn delete_generated_collection(&self, collection_id: &str) -> anyhow::Result<bool> {
+        metadata::delete_generated_collection_thumbnail(
+            &self.write_pool,
+            self.runtime_events.as_ref(),
+            collection_id,
         )
         .await
     }

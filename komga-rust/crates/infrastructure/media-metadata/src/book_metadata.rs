@@ -204,14 +204,21 @@ async fn persist_book_metadata(
         .execute(&mut *tx)
         .await
         .context("delete existing book metadata authors")?;
-    for author in &metadata.authors {
-        sqlx::query("INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) VALUES (?, ?, ?)")
-            .bind(book_id)
-            .bind(&author.name)
-            .bind(&author.role)
+    if !metadata.authors.is_empty() {
+        let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "INSERT INTO BOOK_METADATA_AUTHOR (BOOK_ID, NAME, ROLE) ",
+        );
+        insert
+            .push_values(&metadata.authors, |mut binder, author| {
+                binder
+                    .push_bind(book_id)
+                    .push_bind(&author.name)
+                    .push_bind(&author.role);
+            })
+            .build()
             .execute(&mut *tx)
             .await
-            .context("insert updated book metadata author")?;
+            .context("bulk insert updated book metadata authors")?;
     }
 
     sqlx::query("DELETE FROM BOOK_METADATA_TAG WHERE BOOK_ID = ?")
@@ -219,13 +226,18 @@ async fn persist_book_metadata(
         .execute(&mut *tx)
         .await
         .context("delete existing book metadata tags")?;
-    for tag in &metadata.tags {
-        sqlx::query("INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) VALUES (?, ?)")
-            .bind(book_id)
-            .bind(tag)
+    if !metadata.tags.is_empty() {
+        let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "INSERT INTO BOOK_METADATA_TAG (BOOK_ID, TAG) ",
+        );
+        insert
+            .push_values(&metadata.tags, |mut binder, tag| {
+                binder.push_bind(book_id).push_bind(tag);
+            })
+            .build()
             .execute(&mut *tx)
             .await
-            .context("insert updated book metadata tag")?;
+            .context("bulk insert updated book metadata tags")?;
     }
 
     sqlx::query("DELETE FROM BOOK_METADATA_LINK WHERE BOOK_ID = ?")
@@ -233,14 +245,21 @@ async fn persist_book_metadata(
         .execute(&mut *tx)
         .await
         .context("delete existing book metadata links")?;
-    for link in &metadata.links {
-        sqlx::query("INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) VALUES (?, ?, ?)")
-            .bind(book_id)
-            .bind(&link.label)
-            .bind(&link.url)
+    if !metadata.links.is_empty() {
+        let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "INSERT INTO BOOK_METADATA_LINK (BOOK_ID, LABEL, URL) ",
+        );
+        insert
+            .push_values(&metadata.links, |mut binder, link| {
+                binder
+                    .push_bind(book_id)
+                    .push_bind(&link.label)
+                    .push_bind(&link.url);
+            })
+            .build()
             .execute(&mut *tx)
             .await
-            .context("insert updated book metadata link")?;
+            .context("bulk insert updated book metadata links")?;
     }
 
     tx.commit()

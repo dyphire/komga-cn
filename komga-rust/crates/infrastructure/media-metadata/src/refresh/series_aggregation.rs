@@ -82,22 +82,24 @@ pub async fn aggregate_series_metadata(
                         ))
                     })?;
 
-                for author in aggregate.authors {
-                    sqlx::query(
-                        r#"
-                            INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE)
-                            VALUES (?, ?, ?)
-                            "#,
-                    )
-                    .bind(&series_id)
-                    .bind(author.name)
-                    .bind(author.role)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| { anyhow::anyhow!(error).context( format!(
-                            "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': "
-                        ))
-                    })?;
+                if !aggregate.authors.is_empty() {
+                    let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                        "INSERT INTO BOOK_METADATA_AGGREGATION_AUTHOR (SERIES_ID, NAME, ROLE) ",
+                    );
+                    insert
+                        .push_values(&aggregate.authors, |mut binder, author| {
+                            binder
+                                .push_bind(&series_id)
+                                .push_bind(&author.name)
+                                .push_bind(&author.role);
+                        })
+                        .build()
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|error| { anyhow::anyhow!(error).context( format!(
+                                "failed to populate BOOK_METADATA_AGGREGATION_AUTHOR for '{series_id}': "
+                            ))
+                        })?;
                 }
 
                 sqlx::query("DELETE FROM BOOK_METADATA_AGGREGATION_TAG WHERE SERIES_ID = ?")
@@ -110,22 +112,22 @@ pub async fn aggregate_series_metadata(
                         ))
                     })?;
 
-                for tag in aggregate.tags {
-                    sqlx::query(
-                        r#"
-                            INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG)
-                            VALUES (?, ?)
-                            "#,
-                    )
-                    .bind(&series_id)
-                    .bind(tag)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|error| {
-                        anyhow::anyhow!(error).context(format!(
-                            "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': "
-                        ))
-                    })?;
+                if !aggregate.tags.is_empty() {
+                    let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                        "INSERT INTO BOOK_METADATA_AGGREGATION_TAG (SERIES_ID, TAG) ",
+                    );
+                    insert
+                        .push_values(&aggregate.tags, |mut binder, tag| {
+                            binder.push_bind(&series_id).push_bind(tag);
+                        })
+                        .build()
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|error| {
+                            anyhow::anyhow!(error).context(format!(
+                                "failed to populate BOOK_METADATA_AGGREGATION_TAG for '{series_id}': "
+                            ))
+                        })?;
                 }
 
                 sqlx::query(

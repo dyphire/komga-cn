@@ -164,6 +164,99 @@ pub async fn insert_readlist_thumbnail(
     Ok(record)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "This persistence boundary writes the thumbnail record fields directly."
+)]
+pub async fn insert_generated_readlist_thumbnail(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    readlist_id: &str,
+    thumbnail: &[u8],
+    media_type: &str,
+    width: i64,
+    height: i64,
+) -> anyhow::Result<ReadlistThumbnailRecord> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin generated readlist thumbnail create tx")?;
+
+    let exists = sqlx::query(
+        r#"
+        SELECT 1 AS FOUND
+        FROM READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(readlist_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query readlist existence for generated thumbnail create")?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .context("rollback generated readlist thumbnail create tx")?;
+        return Err(anyhow::anyhow!("readlist does not exist"));
+    }
+
+    // Replace any previously auto-generated thumbnail for this readlist so the
+    // mosaic always reflects the current content. User-uploaded thumbnails are
+    // preserved (different TYPE).
+    sqlx::query(
+        r#"
+        DELETE FROM THUMBNAIL_READLIST
+        WHERE READLIST_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(readlist_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .execute(&mut *tx)
+    .await
+    .context("delete stale generated readlist thumbnails")?;
+
+    let id = generated_thumbnail_id("thumbnail-readlist");
+    sqlx::query(
+        r#"
+        INSERT INTO THUMBNAIL_READLIST
+            (ID, SELECTED, THUMBNAIL, TYPE, READLIST_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(false)
+    .bind(thumbnail)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .bind(readlist_id)
+    .bind(media_type)
+    .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
+    .execute(&mut *tx)
+    .await
+    .context("insert generated readlist thumbnail")?;
+
+    tx.commit()
+        .await
+        .context("commit generated readlist thumbnail create tx")?;
+
+    let record = ReadlistThumbnailRecord {
+        id,
+        readlist_id: readlist_id.to_string(),
+        thumbnail_type: ThumbnailType::Generated,
+        selected: false,
+        media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
+        thumbnail: thumbnail.to_vec(),
+    };
+    emit_thumbnail_readlist_event(runtime_events, &record.readlist_id, record.selected, true);
+    Ok(record)
+}
+
 pub async fn select_readlist_thumbnail(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
@@ -314,6 +407,74 @@ pub async fn delete_readlist_thumbnail(
         .await
         .context("commit readlist thumbnail delete tx")?;
     emit_thumbnail_readlist_event(runtime_events, &target_readlist_id, deleted_selected, false);
+    Ok(true)
+}
+
+pub async fn delete_generated_readlist_thumbnail(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    readlist_id: &str,
+) -> anyhow::Result<bool> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin generated readlist thumbnail delete tx")?;
+
+    let exists = sqlx::query(
+        r#"
+        SELECT 1 AS FOUND
+        FROM READLIST
+        WHERE ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(readlist_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query readlist existence for generated thumbnail delete")?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .context("rollback generated readlist thumbnail delete tx")?;
+        return Ok(false);
+    }
+
+    let deleted_selected = sqlx::query(
+        r#"
+        SELECT SELECTED
+        FROM THUMBNAIL_READLIST
+        WHERE READLIST_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(readlist_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query generated readlist thumbnails for delete")?
+    .map(|row| row.get::<bool, _>("SELECTED"))
+    .unwrap_or(false);
+
+    sqlx::query(
+        r#"
+        DELETE FROM THUMBNAIL_READLIST
+        WHERE READLIST_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(readlist_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .execute(&mut *tx)
+    .await
+    .context("delete generated readlist thumbnails")?;
+
+    if deleted_selected {
+        normalize_readlist_thumbnail_selection(&mut tx, readlist_id, true).await?;
+    }
+
+    tx.commit()
+        .await
+        .context("commit generated readlist thumbnail delete tx")?;
+    emit_thumbnail_readlist_event(runtime_events, readlist_id, deleted_selected, false);
     Ok(true)
 }
 
