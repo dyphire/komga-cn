@@ -1,10 +1,10 @@
 use anyhow::Context;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use komga_application::runtime_sse::RuntimeSseEventSink;
 use komga_domain::discovery::compare_book_names;
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use komga_infrastructure_base::stored_paths::resolve_stored_path;
 use komga_infrastructure_discovery::{delete_book_dependency_rows, delete_series_dependency_rows};
@@ -100,6 +100,24 @@ async fn persist_scanned_library(
     library_id: &str,
     scanned: &ScannedLibrary,
 ) -> anyhow::Result<PersistScannedLibraryOutcome> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("failed to begin scanned library persistence transaction")?;
+    let outcome = persist_scanned_library_inner(&mut tx, library_id, scanned)
+        .await
+        .context("failed to persist scanned library changes")?;
+    tx.commit()
+        .await
+        .context("failed to commit scanned library persistence transaction")?;
+    Ok(outcome)
+}
+
+async fn persist_scanned_library_inner(
+    tx: &mut Transaction<'_, Sqlite>,
+    library_id: &str,
+    scanned: &ScannedLibrary,
+) -> anyhow::Result<PersistScannedLibraryOutcome> {
     let library_id = library_id.to_string();
     let outcome: PersistScannedLibraryOutcome = 'outcome: {
         let mut book_metadata_refreshes = Vec::<BookMetadataRefreshRequest>::new();
@@ -114,7 +132,7 @@ WHERE ID = ?
 LIMIT 1"#,
         )
         .bind(&library_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
@@ -137,7 +155,7 @@ SET UNAVAILABLE_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
             )
             .bind(&library_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 anyhow::anyhow!(error).context(format!(
@@ -166,7 +184,7 @@ SET UNAVAILABLE_DATE = NULL, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
 WHERE ID = ?"#,
             )
             .bind(&library_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .map_err(|error| {
                 anyhow::anyhow!(error).context(format!(
@@ -184,7 +202,7 @@ WHERE ID = ?"#,
         let discovered_series_ids = scanned.discovered_series_ids.clone();
         let mut series_with_deleted_books = HashSet::new();
         let active_book_ids = soft_delete_missing_scan_rows(
-            pool,
+            &mut *tx,
             &library_id,
             &discovered_series_ids,
             &scanned.discovered_book_ids,
@@ -220,7 +238,7 @@ WHERE ID = ?
             .bind(&series.series_url)
             .bind(&library_id)
             .bind(series.oneshot)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .context("failed to update SERIES rows")?
             .rows_affected();
@@ -242,7 +260,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                     .bind(&series.series_url)
                     .bind(&library_id)
                     .bind(series.oneshot)
-                    .execute(pool)
+                    .execute(&mut **tx)
                     .await
                     .context("failed to insert SERIES rows")?
                     .rows_affected();
@@ -262,7 +280,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?)"#,
                 }
             }
 
-            ensure_series_metadata_seed(pool, series)
+            ensure_series_metadata_seed(&mut *tx, series)
                 .await
                 .map_err(|error| {
                     anyhow::anyhow!(error).context(format!(
@@ -307,7 +325,7 @@ WHERE ID = ?
                     .bind(book.file_size)
                     .bind(&library_id)
                     .bind(book.oneshot)
-                    .execute(pool)
+                    .execute(&mut **tx)
                     .await
                     .context("failed to update BOOK rows")?
                     .rows_affected();
@@ -327,7 +345,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))
                             .bind(&library_id)
                             .bind(book.oneshot)
                             .bind(created_date_unix_seconds)
-                            .execute(pool)
+                            .execute(&mut **tx)
                             .await
                             .context("failed to insert BOOK rows")?
                             .rows_affected();
@@ -356,7 +374,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))
                     }
                 }
 
-                ensure_book_metadata_seed(pool, book)
+                ensure_book_metadata_seed(&mut *tx, book)
                     .await
                     .map_err(|error| {
                         anyhow::anyhow!(error).context(format!(
@@ -375,42 +393,49 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))
             }
         }
 
-        for book_id in &scanned.changed_existing_book_ids {
-            sqlx::query(
-                r#"UPDATE MEDIA
-SET STATUS = 'OUTDATED'
-WHERE BOOK_ID = ?"#,
-            )
-            .bind(book_id)
-            .execute(pool)
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to mark MEDIA rows outdated after deep scan for '{book_id}': "
-                ))
-            })?;
+        if !scanned.changed_existing_book_ids.is_empty() {
+            let mut media_outdated_query =
+                sqlx::QueryBuilder::new("UPDATE MEDIA SET STATUS = 'OUTDATED' WHERE BOOK_ID IN (");
+            let mut separated = media_outdated_query.separated(", ");
+            for book_id in &scanned.changed_existing_book_ids {
+                separated.push_bind(book_id);
+            }
+            separated.push_unseparated(")");
+            media_outdated_query
+                .build()
+                .execute(&mut **tx)
+                .await
+                .context("failed to mark MEDIA rows outdated after deep scan")?;
         }
 
-        persist_scanned_sidecars(pool, &library_id, &scanned.sidecars).await?;
+        persist_scanned_sidecars(&mut *tx, &library_id, &scanned.sidecars).await?;
 
-        for series_id in &series_with_deleted_books {
-            if !series_updated_in_main_loop.contains(series_id) {
-                sqlx::query(
-                    r#"UPDATE SERIES SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID = ?"#,
-                )
-                .bind(series_id)
-                .execute(pool)
+        let refresh_candidates = series_with_deleted_books
+            .iter()
+            .filter(|series_id| !series_updated_in_main_loop.contains(*series_id))
+            .collect::<Vec<_>>();
+        for refresh_chunk in refresh_candidates.chunks(500) {
+            let mut refresh = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+                "UPDATE SERIES SET LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID IN (",
+            );
+            let mut separated = refresh.separated(",");
+            for series_id in refresh_chunk {
+                separated.push_bind(series_id);
+            }
+            separated.push_unseparated(")");
+            refresh
+                .build()
+                .execute(&mut **tx)
                 .await
                 .map_err(|error| {
-                    anyhow::anyhow!(error).context(format!(
-                        "failed to refresh LAST_MODIFIED_DATE for series with deleted books '{series_id}': "
-                    ))
+                    anyhow::anyhow!(error).context(
+                        "failed to refresh LAST_MODIFIED_DATE for series with deleted books",
+                    )
                 })?;
-            }
         }
 
         restore_deleted_scan_matches(
-            pool,
+            &mut *tx,
             &library_id,
             &inserted_series,
             &inserted_books,
@@ -427,7 +452,7 @@ SET BOOK_COUNT = (SELECT COUNT(*)
 WHERE LIBRARY_ID = ?"#,
         )
         .bind(&library_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
@@ -435,7 +460,7 @@ WHERE LIBRARY_ID = ?"#,
             ))
         })?;
 
-        let renumbered_book_ids = resort_scanned_series_books(pool, &discovered_series_ids)
+        let renumbered_book_ids = resort_scanned_series_books(&mut *tx, &discovered_series_ids)
             .await
             .map_err(|error| {
                 anyhow::anyhow!(error).context(format!(
@@ -455,41 +480,56 @@ WHERE LIBRARY_ID = ?"#,
 }
 
 async fn resort_scanned_series_books(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     discovered_series_ids: &HashSet<String>,
 ) -> Result<Vec<String>, sqlx::Error> {
     let mut series_ids = discovered_series_ids.iter().cloned().collect::<Vec<_>>();
     series_ids.sort();
 
     let mut renumbered_book_ids = Vec::new();
-    for series_id in series_ids {
-        let book_rows = sqlx::query(
-            r#"SELECT b.ID AS BOOK_ID, b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER,
+    if series_ids.is_empty() {
+        return Ok(renumbered_book_ids);
+    }
+
+    let mut books_by_series_id = HashMap::<String, Vec<PersistedScannedSeriesBookRow>>::new();
+    for series_chunk in series_ids.chunks(500) {
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            r#"SELECT b.SERIES_ID AS SERIES_ID, b.ID AS BOOK_ID, b.NAME AS BOOK_NAME, b.NUMBER AS BOOK_NUMBER,
        COALESCE(bm.NUMBER, '') AS METADATA_NUMBER,
        COALESCE(bm.NUMBER_SORT, CAST(0 AS REAL)) AS METADATA_NUMBER_SORT,
        COALESCE(bm.NUMBER_LOCK, 0) AS METADATA_NUMBER_LOCK,
        COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK
 FROM BOOK b
 LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
-WHERE b.SERIES_ID = ?
-ORDER BY b.ID ASC"#,
-        )
-        .bind(&series_id)
-        .fetch_all(pool)
-        .await?;
+WHERE b.SERIES_ID IN ("#,
+        );
+        let mut separated = query.separated(",");
+        for series_id in series_chunk {
+            separated.push_bind(series_id);
+        }
+        separated.push_unseparated(")");
+        let rows = query.build().fetch_all(&mut **tx).await?;
+        for row in rows {
+            let series_id = row.get::<String, _>("SERIES_ID");
+            books_by_series_id
+                .entry(series_id)
+                .or_default()
+                .push(PersistedScannedSeriesBookRow {
+                    book_id: row.get::<String, _>("BOOK_ID"),
+                    book_name: row.get::<String, _>("BOOK_NAME"),
+                    book_number: row.get::<i64, _>("BOOK_NUMBER"),
+                    metadata_number: row.get::<String, _>("METADATA_NUMBER"),
+                    metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
+                    metadata_number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
+                    metadata_number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
+                });
+        }
+    }
 
-        let mut books = book_rows
-            .into_iter()
-            .map(|row| PersistedScannedSeriesBookRow {
-                book_id: row.get::<String, _>("BOOK_ID"),
-                book_name: row.get::<String, _>("BOOK_NAME"),
-                book_number: row.get::<i64, _>("BOOK_NUMBER"),
-                metadata_number: row.get::<String, _>("METADATA_NUMBER"),
-                metadata_number_sort: row.get::<f64, _>("METADATA_NUMBER_SORT"),
-                metadata_number_lock: row.get::<bool, _>("METADATA_NUMBER_LOCK"),
-                metadata_number_sort_lock: row.get::<bool, _>("METADATA_NUMBER_SORT_LOCK"),
-            })
-            .collect::<Vec<_>>();
+    for series_id in series_ids {
+        let Some(books) = books_by_series_id.get_mut(&series_id) else {
+            continue;
+        };
         books.sort_by(|left, right| {
             compare_book_names(&left.book_name, &right.book_name)
                 .then_with(|| left.book_id.cmp(&right.book_id))
@@ -508,7 +548,7 @@ WHERE ID = ?"#,
                 )
                 .bind(new_number)
                 .bind(&book.book_id)
-                .execute(pool)
+                .execute(&mut **tx)
                 .await?;
             }
 
@@ -538,7 +578,7 @@ WHERE BOOK_ID = ?"#,
                 .bind(&metadata_number)
                 .bind(metadata_number_sort)
                 .bind(&book.book_id)
-                .execute(pool)
+                .execute(&mut **tx)
                 .await?;
                 renumbered_book_ids.push(book.book_id.clone());
             }
@@ -549,7 +589,7 @@ WHERE BOOK_ID = ?"#,
 }
 
 async fn soft_delete_missing_scan_rows(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     library_id: &str,
     discovered_series_ids: &HashSet<String>,
     discovered_book_ids: &HashSet<String>,
@@ -564,7 +604,7 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
     )
     .bind(library_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|error| {
         anyhow::anyhow!(error).context(format!(
@@ -578,7 +618,7 @@ WHERE LIBRARY_ID = ?
   AND DELETED_DATE IS NULL"#,
     )
     .bind(library_id)
-    .fetch_all(pool)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|error| {
         anyhow::anyhow!(error).context(format!(
@@ -604,11 +644,30 @@ WHERE LIBRARY_ID = ?
         .collect::<Vec<_>>();
     let missing_series_id_set = missing_series_ids.iter().cloned().collect::<HashSet<_>>();
 
-    for (book_id, series_id) in &existing_books {
-        if discovered_book_ids.contains(book_id) || !missing_series_id_set.contains(series_id) {
-            continue;
+    let orphaned_book_rows = existing_books
+        .iter()
+        .filter(|(book_id, series_id)| {
+            !discovered_book_ids.contains(book_id) && missing_series_id_set.contains(series_id)
+        })
+        .collect::<Vec<_>>();
+    for orphaned_chunk in orphaned_book_rows.chunks(500) {
+        let mut delete = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "UPDATE BOOK SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID IN (",
+        );
+        let mut separated = delete.separated(",");
+        for (book_id, _) in orphaned_chunk {
+            separated.push_bind(book_id);
         }
-        soft_delete_missing_book(pool, book_id).await?;
+        separated.push_unseparated(")");
+        delete
+            .build()
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context("failed to bulk soft-delete orphaned BOOK rows")
+            })?;
+    }
+    for (book_id, series_id) in orphaned_book_rows {
         record_book_runtime_sse_event(
             runtime_events,
             book_id,
@@ -619,20 +678,24 @@ WHERE LIBRARY_ID = ?
         changed_series_ids.insert(series_id.clone());
     }
 
+    for missing_chunk in missing_series_ids.chunks(500) {
+        let mut delete = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "UPDATE SERIES SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID IN (",
+        );
+        let mut separated = delete.separated(",");
+        for series_id in missing_chunk {
+            separated.push_bind(series_id);
+        }
+        separated.push_unseparated(")");
+        delete
+            .build()
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context("failed to bulk soft-delete missing SERIES rows")
+            })?;
+    }
     for series_id in &missing_series_ids {
-        sqlx::query(
-            r#"UPDATE SERIES
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-        )
-        .bind(series_id)
-        .execute(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to soft-delete missing SERIES '{series_id}': "
-            ))
-        })?;
         record_series_runtime_sse_event(
             runtime_events,
             series_id,
@@ -641,11 +704,30 @@ WHERE ID = ?"#,
         );
     }
 
-    for (book_id, series_id) in &existing_books {
-        if discovered_book_ids.contains(book_id) || missing_series_id_set.contains(series_id) {
-            continue;
+    let missing_book_rows = existing_books
+        .iter()
+        .filter(|(book_id, series_id)| {
+            !discovered_book_ids.contains(book_id) && !missing_series_id_set.contains(series_id)
+        })
+        .collect::<Vec<_>>();
+    for missing_chunk in missing_book_rows.chunks(500) {
+        let mut delete = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "UPDATE BOOK SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP WHERE ID IN (",
+        );
+        let mut separated = delete.separated(",");
+        for (book_id, _) in missing_chunk {
+            separated.push_bind(book_id);
         }
-        soft_delete_missing_book(pool, book_id).await?;
+        separated.push_unseparated(")");
+        delete
+            .build()
+            .execute(&mut **tx)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context("failed to bulk soft-delete missing BOOK rows")
+            })?;
+    }
+    for (book_id, series_id) in missing_book_rows {
         record_book_runtime_sse_event(
             runtime_events,
             book_id,
@@ -660,24 +742,8 @@ WHERE ID = ?"#,
     Ok(active_book_ids)
 }
 
-async fn soft_delete_missing_book(pool: &SqlitePool, book_id: &str) -> anyhow::Result<()> {
-    sqlx::query(
-        r#"UPDATE BOOK
-SET DELETED_DATE = CURRENT_TIMESTAMP, LAST_MODIFIED_DATE = CURRENT_TIMESTAMP
-WHERE ID = ?"#,
-    )
-    .bind(book_id)
-    .execute(pool)
-    .await
-    .map_err(|error| {
-        anyhow::anyhow!(error).context(format!("failed to soft-delete missing BOOK '{book_id}'"))
-    })?;
-
-    Ok(())
-}
-
 async fn persist_scanned_sidecars(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     library_id: &str,
     sidecars: &[ScannedSidecarRow],
 ) -> anyhow::Result<()> {
@@ -692,7 +758,7 @@ WHERE URL = ?
         .bind(sidecar.last_modified_unix_seconds)
         .bind(&sidecar.url)
         .bind(library_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .context("failed to update SIDECAR rows")?
         .rows_affected();
@@ -706,7 +772,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
             .bind(&sidecar.parent_url)
             .bind(sidecar.last_modified_unix_seconds)
             .bind(library_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .context("failed to insert SIDECAR rows")?;
         }
@@ -718,7 +784,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
         .collect::<HashSet<_>>();
     let existing_sidecar_urls = sqlx::query(r#"SELECT URL FROM SIDECAR WHERE LIBRARY_ID = ?"#)
         .bind(library_id)
-        .fetch_all(pool)
+        .fetch_all(&mut **tx)
         .await
         .context("failed to load SIDECAR rows for cleanup")?;
     for row in existing_sidecar_urls {
@@ -729,7 +795,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
         sqlx::query(r#"DELETE FROM SIDECAR WHERE LIBRARY_ID = ? AND URL = ?"#)
             .bind(library_id)
             .bind(&url)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .context("failed to delete stale SIDECAR row")?;
     }
@@ -738,7 +804,7 @@ VALUES (?, ?, datetime(?, 'unixepoch'), ?)"#,
 }
 
 async fn restore_deleted_scan_matches(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     library_id: &str,
     inserted_series: &[InsertedSeriesCandidate],
     inserted_books: &[InsertedBookCandidate],
@@ -748,7 +814,7 @@ async fn restore_deleted_scan_matches(
     let library_root = resolve_stored_path(
         sqlx::query("SELECT ROOT FROM LIBRARY WHERE ID = ? LIMIT 1")
             .bind(library_id)
-            .fetch_one(pool)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|error| {
                 anyhow::anyhow!(error).context(format!(
@@ -759,29 +825,29 @@ async fn restore_deleted_scan_matches(
             .as_str(),
     );
     let restored_series_matches =
-        try_restore_deleted_series(pool, library_root.as_path(), inserted_series).await?;
+        try_restore_deleted_series(&mut *tx, library_root.as_path(), inserted_series).await?;
     for restored in &restored_series_matches {
         changed_series_ids.insert(restored.inserted_series_id.clone());
     }
     let restored_books =
-        try_restore_deleted_books(pool, library_root.as_path(), inserted_books).await?;
+        try_restore_deleted_books(&mut *tx, library_root.as_path(), inserted_books).await?;
     changed_series_ids.extend(restored_books.series_ids);
     book_metadata_refreshes.extend(restored_books.book_metadata_refreshes);
     for restored in &restored_series_matches {
         changed_series_ids.insert(restored.inserted_series_id.clone());
-        delete_restored_legacy_series(pool, &restored.deleted_series_id).await?;
+        delete_restored_legacy_series(&mut *tx, &restored.deleted_series_id).await?;
     }
 
     Ok(())
 }
 
 async fn delete_restored_legacy_series(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     deleted_series_id: &str,
 ) -> anyhow::Result<()> {
     let deleted_book_ids = sqlx::query("SELECT ID FROM BOOK WHERE SERIES_ID = ? ORDER BY ID ASC")
         .bind(deleted_series_id)
-        .fetch_all(pool)
+        .fetch_all(&mut **tx)
         .await
         .map_err(|error| {
             anyhow::anyhow!(error)
@@ -789,21 +855,21 @@ async fn delete_restored_legacy_series(
         })?;
     for deleted_book_row in deleted_book_ids {
         let deleted_book_id = deleted_book_row.get::<String, _>("ID");
-        delete_book_dependency_rows(pool, &deleted_book_id)
+        delete_book_dependency_rows(&mut *tx, &deleted_book_id)
             .await
             .context("failed to delete restored legacy series book dependencies")?;
     }
     sqlx::query("DELETE FROM BOOK WHERE SERIES_ID = ?")
         .bind(deleted_series_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .context("failed to delete restored legacy series BOOK rows: ")?;
-    delete_series_dependency_rows(pool, deleted_series_id)
+    delete_series_dependency_rows(&mut *tx, deleted_series_id)
         .await
         .context("failed to delete restored legacy series dependencies")?;
     sqlx::query("DELETE FROM SERIES WHERE ID = ?")
         .bind(deleted_series_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await
         .context("failed to delete restored legacy SERIES row")?;
 
@@ -854,7 +920,7 @@ WHERE LIBRARY_ID = ?"#,
 }
 
 async fn ensure_series_metadata_seed(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     series: &ScannedSeriesRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -865,19 +931,19 @@ VALUES (?, ?, ?, ?)"#,
     .bind(&series.series_name)
     .bind(&series.series_name)
     .bind(&series.series_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
     sqlx::query(r#"INSERT OR IGNORE INTO BOOK_METADATA_AGGREGATION (SERIES_ID) VALUES (?)"#)
         .bind(&series.series_id)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
 
     Ok(())
 }
 
 async fn ensure_book_metadata_seed(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     book: &ScannedBookRow,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -890,7 +956,7 @@ WHERE EXISTS (SELECT 1 FROM BOOK WHERE ID = ? AND DELETED_DATE IS NULL)"#,
     .bind(&book.book_name)
     .bind(&book.book_id)
     .bind(&book.book_id)
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
     Ok(())
@@ -951,7 +1017,11 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "library 'missing-library' does not exist"
+            "failed to persist scanned library changes"
+        );
+        assert!(
+            format!("{error:#}").contains("library 'missing-library' does not exist"),
+            "error chain should retain the missing-library cause: {error:#}"
         );
 
         pool.close().await;

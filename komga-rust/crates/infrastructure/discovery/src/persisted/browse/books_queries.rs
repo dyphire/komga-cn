@@ -13,6 +13,7 @@ use komga_domain::discovery::{
 
 use super::models::{PersistedBookSummary, PersistedBooksBrowseQuery, PersistedBooksSortMode};
 use super::{DiscoveryQueryContext, SqliteDiscoveryBrowseService};
+use super::sql_pushdown;
 
 use komga_application::discovery::BookReadModel;
 
@@ -54,6 +55,31 @@ pub(super) async fn load_persisted_books_page(
                 .await?;
         }
     } else {
+        if let Some(sql_page) = sql_pushdown::try_load_books_page(backend, context, &query).await? {
+            let mut books = Vec::new();
+            for chunk in sql_page.ids.chunks(500) {
+                books.extend(
+                    backend
+                        .load_persisted_book_summaries_by_ids(context.user_id.as_deref(), chunk)
+                        .await?,
+                );
+            }
+            let content: Vec<BookReadModel> = books
+                .into_iter()
+                .map(to_book_row)
+                .map(book_row_to_read_model)
+                .collect();
+            return Ok(PageEnvelope::from_slice(
+                content,
+                if query.unpaged { 0 } else { query.page },
+                if query.unpaged {
+                    sql_page.total_elements
+                } else {
+                    query.size
+                },
+                sql_page.total_elements,
+            ));
+        }
         books = backend
             .load_persisted_book_summaries(context.user_id.as_deref())
             .await?;

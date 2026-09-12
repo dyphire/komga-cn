@@ -304,15 +304,20 @@ async fn persist_series_metadata_refresh_state(
                 .context(format!("failed to clear series genres for '{series_id}'"))
         })?;
 
-    for genre in &state.genres {
-        sqlx::query("INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) VALUES (?, ?)")
-            .bind(series_id)
-            .bind(genre)
+    if !state.genres.is_empty() {
+        let mut insert = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "INSERT INTO SERIES_METADATA_GENRE (SERIES_ID, GENRE) ",
+        );
+        insert
+            .push_values(&state.genres, |mut binder, genre| {
+                binder.push_bind(series_id).push_bind(genre);
+            })
+            .build()
             .execute(&mut *tx)
             .await
             .map_err(|error| {
                 anyhow::anyhow!(error)
-                    .context(format!("failed to insert series genre for '{series_id}'"))
+                    .context(format!("failed to insert series genres for '{series_id}'"))
             })?;
     }
 

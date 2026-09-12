@@ -23,6 +23,7 @@ mod books_queries;
 mod grouping;
 mod models;
 mod series_queries;
+mod sql_pushdown;
 
 use models::{
     BooksFilterCriteria, PersistedBookPosterSummary, PersistedBookSummary,

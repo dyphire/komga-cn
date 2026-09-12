@@ -313,6 +313,21 @@ pub trait ThumbnailWriterPort: Send + Sync {
 
     async fn delete_readlist(&self, readlist_id: &str, thumbnail_id: &str) -> anyhow::Result<bool>;
 
+    /// Persist a server-generated (mosaic) thumbnail for a readlist, replacing
+    /// any previously auto-generated thumbnail. User-uploaded thumbnails are kept.
+    async fn insert_generated_readlist(
+        &self,
+        readlist_id: &str,
+        thumbnail: &[u8],
+        media_type: &str,
+        width: i64,
+        height: i64,
+    ) -> anyhow::Result<ReadlistThumbnailRecord>;
+
+    /// Invalidate server-generated (mosaic) thumbnails for a readlist, e.g. when
+    /// its book membership changes. User-uploaded thumbnails are kept.
+    async fn delete_generated_readlist(&self, readlist_id: &str) -> anyhow::Result<bool>;
+
     async fn insert_collection(
         &self,
         collection_id: &str,
@@ -330,6 +345,21 @@ pub trait ThumbnailWriterPort: Send + Sync {
         collection_id: &str,
         thumbnail_id: &str,
     ) -> anyhow::Result<bool>;
+
+    /// Persist a server-generated (mosaic) thumbnail for a collection, replacing
+    /// any previously auto-generated thumbnail. User-uploaded thumbnails are kept.
+    async fn insert_generated_collection(
+        &self,
+        collection_id: &str,
+        thumbnail: &[u8],
+        media_type: &str,
+        width: i64,
+        height: i64,
+    ) -> anyhow::Result<CollectionThumbnailRecord>;
+
+    /// Invalidate server-generated (mosaic) thumbnails for a collection, e.g.
+    /// when its series membership changes. User-uploaded thumbnails are kept.
+    async fn delete_generated_collection(&self, collection_id: &str) -> anyhow::Result<bool>;
 }
 
 /// Stateless filesystem I/O for resolving page/resource content from archives and PDFs.

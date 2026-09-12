@@ -781,6 +781,35 @@ async fn router_readlist_thumbnail_falls_back_to_dynamic_mosaic_when_no_persiste
         .expect("book thumbnail table should be renamed for readlist mosaic source failure");
     pool.close().await;
 
+    // The generated mosaic was persisted, so a broken source table no longer
+    // affects serving the persisted thumbnail.
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/readlists/readlist-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("readlist thumbnail persisted-hit request should build"),
+        )
+        .await
+        .expect("readlist thumbnail persisted-hit request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Clear the persisted generated thumbnail: with no persisted thumbnail and a
+    // broken mosaic source, the request must now propagate the failure as 500.
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("readlist mosaic source failure db should reopen");
+    sqlx::query("DELETE FROM THUMBNAIL_READLIST WHERE READLIST_ID = ?")
+        .bind("readlist-1")
+        .execute(&pool)
+        .await
+        .expect("generated readlist thumbnail should be cleared for source failure");
+    pool.close().await;
+
     let response = ctx
         .app()
         .clone()
@@ -931,6 +960,35 @@ async fn router_collection_thumbnail_falls_back_to_dynamic_mosaic_when_no_persis
         .execute(&pool)
         .await
         .expect("series thumbnail table should be renamed for collection mosaic source failure");
+    pool.close().await;
+
+    // The generated mosaic was persisted, so a broken source table no longer
+    // affects serving the persisted thumbnail.
+    let response = ctx
+        .app()
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/collections/collection-1/thumbnail")
+                .header("x-auth-token", &auth_token)
+                .body(Body::empty())
+                .expect("collection thumbnail persisted-hit request should build"),
+        )
+        .await
+        .expect("collection thumbnail persisted-hit request should complete");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Clear the persisted generated thumbnail: with no persisted thumbnail and a
+    // broken mosaic source, the request must now propagate the failure as 500.
+    let pool = connect_test_pool(ctx.paths().main_db.as_path(), 1)
+        .await
+        .expect("collection mosaic source failure db should reopen");
+    sqlx::query("DELETE FROM THUMBNAIL_COLLECTION WHERE COLLECTION_ID = ?")
+        .bind("collection-1")
+        .execute(&pool)
+        .await
+        .expect("generated collection thumbnail should be cleared for source failure");
     pool.close().await;
 
     let response = ctx

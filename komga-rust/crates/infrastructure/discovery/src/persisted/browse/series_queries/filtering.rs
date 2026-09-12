@@ -14,6 +14,26 @@ use super::super::models::{
     PersistedSeriesBrowseQuery, PersistedSeriesSortMode, PersistedSeriesSummary,
 };
 use super::super::{DiscoveryQueryContext, SqliteDiscoveryBrowseService};
+use super::super::sql_pushdown;
+
+async fn enrich_series_read_progress(
+    backend: &SqliteDiscoveryBrowseService,
+    user_id: Option<&str>,
+    mut content: Vec<PersistedSeriesSummary>,
+) -> anyhow::Result<Vec<PersistedSeriesSummary>> {
+    if let Some(user_id) = user_id {
+        let read_progress = backend.load_series_read_progress_counts(user_id).await?;
+        for row in &mut content {
+            let counts = read_progress.get(&row.id).copied().unwrap_or_default();
+            row.books_read_count = counts.read_count.max(0) as u64;
+            row.books_in_progress_count = counts.in_progress_count.max(0) as u64;
+            row.books_unread_count = row
+                .books_count
+                .saturating_sub(row.books_read_count + row.books_in_progress_count);
+        }
+    }
+    Ok(content)
+}
 
 fn first_collection_sort_id(condition: Option<&SeriesCondition>) -> Option<&str> {
     fn visit(condition: &SeriesCondition) -> Option<&str> {
@@ -57,6 +77,24 @@ pub(in crate::persisted::browse) async fn load_persisted_series_page(
                 .await?;
         }
     } else {
+        if let Some(sql_page) = sql_pushdown::try_load_series_page(backend, context, &query).await? {
+            let mut series = Vec::new();
+            for chunk in sql_page.ids.chunks(500) {
+                series.extend(backend.load_persisted_series_summaries_by_ids(chunk).await?);
+            }
+            let content = enrich_series_read_progress(backend, context.user_id.as_deref(), series)
+                .await?;
+            return Ok(PageEnvelope::from_slice(
+                content,
+                if query.unpaged { 0 } else { query.page },
+                if query.unpaged {
+                    sql_page.total_elements
+                } else {
+                    query.size
+                },
+                sql_page.total_elements,
+            ));
+        }
         series = backend.load_persisted_series_summaries().await?;
     }
 
@@ -129,23 +167,15 @@ pub(in crate::persisted::browse) async fn load_persisted_series_page(
     let page = filter_and_paginate_series(rows, &browse_ctx, engine_query, eval_ctx)?;
 
     // Enrich read progress counts on the paginated result
-    let mut content: Vec<PersistedSeriesSummary> = page
-        .content
-        .into_iter()
-        .map(series_row_to_persisted)
-        .collect();
-
-    if let Some(user_id) = context.user_id.as_deref() {
-        let read_progress = backend.load_series_read_progress_counts(user_id).await?;
-        for row in &mut content {
-            let counts = read_progress.get(&row.id).copied().unwrap_or_default();
-            row.books_read_count = counts.read_count.max(0) as u64;
-            row.books_in_progress_count = counts.in_progress_count.max(0) as u64;
-            row.books_unread_count = row
-                .books_count
-                .saturating_sub(row.books_read_count + row.books_in_progress_count);
-        }
-    }
+    let content = enrich_series_read_progress(
+        backend,
+        context.user_id.as_deref(),
+        page.content
+            .into_iter()
+            .map(series_row_to_persisted)
+            .collect(),
+    )
+    .await?;
 
     Ok(PageEnvelope::from_slice(
         content,

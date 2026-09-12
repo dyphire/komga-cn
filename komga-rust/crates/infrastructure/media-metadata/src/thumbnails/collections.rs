@@ -183,6 +183,99 @@ pub async fn insert_collection_thumbnail(
     Ok(record)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "This persistence boundary writes the thumbnail record fields directly."
+)]
+pub async fn insert_generated_collection_thumbnail(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    collection_id: &str,
+    thumbnail: &[u8],
+    media_type: &str,
+    width: i64,
+    height: i64,
+) -> anyhow::Result<CollectionThumbnailRecord> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin generated collection thumbnail create tx")?;
+
+    let exists = sqlx::query(
+        r#"
+        SELECT 1 AS FOUND
+        FROM COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(collection_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query collection existence for generated thumbnail create")?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .context("rollback generated collection thumbnail create tx")?;
+        return Err(anyhow::anyhow!("collection does not exist"));
+    }
+
+    // Replace any previously auto-generated thumbnail for this collection so the
+    // mosaic always reflects the current content. User-uploaded thumbnails are
+    // preserved (different TYPE).
+    sqlx::query(
+        r#"
+        DELETE FROM THUMBNAIL_COLLECTION
+        WHERE COLLECTION_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(collection_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .execute(&mut *tx)
+    .await
+    .context("delete stale generated collection thumbnails")?;
+
+    let id = generated_thumbnail_id("thumbnail-collection");
+    sqlx::query(
+        r#"
+        INSERT INTO THUMBNAIL_COLLECTION
+            (ID, SELECTED, THUMBNAIL, TYPE, COLLECTION_ID, MEDIA_TYPE, FILE_SIZE, WIDTH, HEIGHT)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&id)
+    .bind(false)
+    .bind(thumbnail)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .bind(collection_id)
+    .bind(media_type)
+    .bind(thumbnail.len() as i64)
+    .bind(width)
+    .bind(height)
+    .execute(&mut *tx)
+    .await
+    .context("insert generated collection thumbnail")?;
+
+    tx.commit()
+        .await
+        .context("commit generated collection thumbnail create tx")?;
+
+    let record = CollectionThumbnailRecord {
+        id,
+        collection_id: collection_id.to_string(),
+        thumbnail_type: ThumbnailType::Generated,
+        selected: false,
+        media_type: media_type.to_string(),
+        file_size: thumbnail.len() as i64,
+        width,
+        height,
+        thumbnail: thumbnail.to_vec(),
+    };
+    emit_thumbnail_collection_event(runtime_events, &record.collection_id, record.selected, true);
+    Ok(record)
+}
+
 pub async fn select_collection_thumbnail(
     pool: &SqlitePool,
     runtime_events: &dyn RuntimeSseEventSink,
@@ -319,6 +412,74 @@ pub async fn delete_collection_thumbnail(
         deleted_selected,
         false,
     );
+    Ok(true)
+}
+
+pub async fn delete_generated_collection_thumbnail(
+    pool: &SqlitePool,
+    runtime_events: &dyn RuntimeSseEventSink,
+    collection_id: &str,
+) -> anyhow::Result<bool> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("begin generated collection thumbnail delete tx")?;
+
+    let exists = sqlx::query(
+        r#"
+        SELECT 1 AS FOUND
+        FROM COLLECTION
+        WHERE ID = ?
+        LIMIT 1
+        "#,
+    )
+    .bind(collection_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query collection existence for generated thumbnail delete")?
+    .is_some();
+    if !exists {
+        tx.rollback()
+            .await
+            .context("rollback generated collection thumbnail delete tx")?;
+        return Ok(false);
+    }
+
+    let deleted_selected = sqlx::query(
+        r#"
+        SELECT SELECTED
+        FROM THUMBNAIL_COLLECTION
+        WHERE COLLECTION_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(collection_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .fetch_optional(&mut *tx)
+    .await
+    .context("query generated collection thumbnails for delete")?
+    .map(|row| row.get::<bool, _>("SELECTED"))
+    .unwrap_or(false);
+
+    sqlx::query(
+        r#"
+        DELETE FROM THUMBNAIL_COLLECTION
+        WHERE COLLECTION_ID = ? AND TYPE = ?
+        "#,
+    )
+    .bind(collection_id)
+    .bind(ThumbnailType::Generated.persisted_name())
+    .execute(&mut *tx)
+    .await
+    .context("delete generated collection thumbnails")?;
+
+    if deleted_selected {
+        normalize_collection_thumbnail_selection(&mut tx, collection_id, true).await?;
+    }
+
+    tx.commit()
+        .await
+        .context("commit generated collection thumbnail delete tx")?;
+    emit_thumbnail_collection_event(runtime_events, collection_id, deleted_selected, false);
     Ok(true)
 }
 

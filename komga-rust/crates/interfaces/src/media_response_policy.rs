@@ -32,6 +32,15 @@ impl MediaAssetResponse {
         self
     }
 
+    /// Sets the ETag to a file-metadata-derived value when available
+    /// (source file mtime + size + request variant key), falling back to the
+    /// full content hash otherwise. Avoids hashing the whole body on the hot
+    /// page-thumbnail path while keeping 304 semantics correct.
+    pub(crate) fn with_file_etag(mut self, file_etag: Option<String>) -> Self {
+        self.etag = Some(file_etag.unwrap_or_else(|| asset_etag(self.bytes.as_slice())));
+        self
+    }
+
     pub(crate) fn with_last_modified(mut self, last_modified: Option<String>) -> Self {
         self.last_modified = last_modified;
         self
