@@ -8,7 +8,7 @@ use komga_domain::discovery::{
 
 use super::{
     CollectionMutationPort, CollectionProjectionPort, CollectionReadModel, CollectionSearchPort,
-    CollectionSeriesPort, PersistedCollectionAccessRecord,
+    CollectionSeriesPort, PersistedCollectionAccessRecord, PersistedSeriesRestrictionRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,9 +119,79 @@ where
         };
         let search_limit = content.len().max(1);
 
+        let all_series_ids: Vec<String> = content
+            .iter()
+            .flat_map(|collection| collection.series_ids.iter().cloned())
+            .collect();
+        let mut seen_series = std::collections::HashSet::new();
+        let all_series_ids: Vec<String> = all_series_ids
+            .into_iter()
+            .filter(|series_id| seen_series.insert(series_id.clone()))
+            .collect();
+        let library_ids: HashMap<String, String> = if all_series_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.series
+                .load_series_library_ids_for_ids(&all_series_ids)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let needs_restrictions = visibility_context.restrictions.is_some()
+            || request_scope_context
+                .and_then(|context| context.restrictions.as_ref())
+                .is_some();
+        let restrictions: HashMap<String, PersistedSeriesRestrictionRecord> =
+            if needs_restrictions && !all_series_ids.is_empty() {
+                self.series
+                    .load_series_restrictions_for_ids(&all_series_ids)
+                    .await?
+                    .into_iter()
+                    .collect()
+            } else {
+                HashMap::new()
+            };
+
         for collection in &mut content {
-            self.apply_visibility(collection, visibility_context, request_scope_context)
-                .await?;
+            let series_ids = &collection.series_ids;
+            let mut visible_series_ids = Vec::with_capacity(series_ids.len());
+            let mut matches_requested_scope = request_scope_context.is_none();
+
+            for series_id in series_ids {
+                let Some(series_library_id) = library_ids.get(series_id) else {
+                    continue;
+                };
+
+                if let Some(request_context) = request_scope_context
+                    && !matches_requested_scope
+                    && series_visible_with(
+                        series_id,
+                        series_library_id,
+                        &restrictions,
+                        request_context,
+                    )
+                {
+                    matches_requested_scope = true;
+                }
+
+                if series_visible_with(
+                    series_id,
+                    series_library_id,
+                    &restrictions,
+                    visibility_context,
+                ) {
+                    visible_series_ids.push(series_id.clone());
+                }
+            }
+
+            if visible_series_ids.len() != series_ids.len() {
+                collection.filtered = true;
+            }
+            collection.series_ids = if matches_requested_scope {
+                visible_series_ids
+            } else {
+                vec![]
+            };
         }
         content.retain(|collection| !collection.series_ids.is_empty());
 
@@ -217,24 +287,28 @@ where
     async fn load_collections(&self) -> anyhow::Result<Vec<CollectionReadModel>> {
         let rows = self.collections.load_persisted_collections().await?;
 
+        let collection_ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        let mut series_ids_by_collection: HashMap<String, Vec<String>> = HashMap::new();
+        if !collection_ids.is_empty() {
+            for (collection_id, series_id) in self
+                .collections
+                .load_persisted_collection_series_ids_for_ids(&collection_ids)
+                .await?
+            {
+                series_ids_by_collection
+                    .entry(collection_id)
+                    .or_default()
+                    .push(series_id);
+            }
+        }
+
         let mut collections = Vec::with_capacity(rows.len());
         for row in rows {
-            collections.push(self.collection_read_model(row).await?);
+            let series_ids = series_ids_by_collection.remove(&row.id).unwrap_or_default();
+            collections.push(collection_from_record(row, series_ids));
         }
 
         Ok(collections)
-    }
-
-    async fn collection_read_model(
-        &self,
-        row: PersistedCollectionAccessRecord,
-    ) -> anyhow::Result<CollectionReadModel> {
-        let id = row.id.clone();
-        let series_ids = self
-            .collections
-            .load_persisted_collection_series_ids(&id)
-            .await?;
-        Ok(collection_from_record(row, series_ids))
     }
 
     async fn load_collection_detail(
@@ -262,41 +336,63 @@ where
         visibility_context: &DiscoveryQueryContext,
         request_scope_context: Option<&DiscoveryQueryContext>,
     ) -> anyhow::Result<()> {
-        let mut visible_series_ids = Vec::with_capacity(collection.series_ids.len());
+        let series_ids = &collection.series_ids;
+        let mut visible_series_ids = Vec::with_capacity(series_ids.len());
         let mut matches_requested_scope = request_scope_context.is_none();
 
-        for series_id in &collection.series_ids {
-            let Some(series_library_id) = self.series.load_series_library_id(series_id).await?
-            else {
+        let library_ids: HashMap<String, String> = if series_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.series
+                .load_series_library_ids_for_ids(series_ids)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let needs_restrictions = visibility_context.restrictions.is_some()
+            || request_scope_context
+                .and_then(|context| context.restrictions.as_ref())
+                .is_some();
+        let restrictions: HashMap<String, PersistedSeriesRestrictionRecord> = if needs_restrictions
+            && !series_ids.is_empty()
+        {
+            self.series
+                .load_series_restrictions_for_ids(series_ids)
+                .await?
+                .into_iter()
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
+        for series_id in series_ids {
+            let Some(series_library_id) = library_ids.get(series_id) else {
                 continue;
             };
 
             if let Some(request_context) = request_scope_context
                 && !matches_requested_scope
-                && series_visible_to_context(
-                    self.series,
-                    request_context,
+                && series_visible_with(
                     series_id,
-                    Some(series_library_id.as_str()),
+                    series_library_id,
+                    &restrictions,
+                    request_context,
                 )
-                .await?
             {
                 matches_requested_scope = true;
             }
 
-            if series_visible_to_context(
-                self.series,
-                visibility_context,
+            if series_visible_with(
                 series_id,
-                Some(series_library_id.as_str()),
-            )
-            .await?
-            {
+                series_library_id,
+                &restrictions,
+                visibility_context,
+            ) {
                 visible_series_ids.push(series_id.clone());
             }
         }
 
-        if visible_series_ids.len() != collection.series_ids.len() {
+        if visible_series_ids.len() != series_ids.len() {
             collection.filtered = true;
         }
         collection.series_ids = if matches_requested_scope {
@@ -307,6 +403,34 @@ where
 
         Ok(())
     }
+}
+
+fn series_visible_with(
+    series_id: &str,
+    library_id: &str,
+    restrictions: &HashMap<String, PersistedSeriesRestrictionRecord>,
+    context: &DiscoveryQueryContext,
+) -> bool {
+    if let Some(authorized_libraries) = context.authorized_library_ids.as_ref()
+        && !authorized_libraries
+            .iter()
+            .any(|candidate| candidate.as_str() == library_id)
+    {
+        return false;
+    }
+
+    let Some(restriction_set) = context.restrictions.as_ref() else {
+        return true;
+    };
+
+    let Some(record) = restrictions.get(series_id) else {
+        return false;
+    };
+    content_allowed_by_restrictions(
+        restriction_set,
+        record.age_rating,
+        &record.labels,
+    )
 }
 
 fn collection_from_record(
@@ -322,42 +446,6 @@ fn collection_from_record(
         last_modified_date: row.last_modified_date,
         filtered: false,
     }
-}
-
-async fn series_visible_to_context(
-    series: &(impl CollectionSeriesPort + ?Sized),
-    context: &DiscoveryQueryContext,
-    series_id: &str,
-    known_library_id: Option<&str>,
-) -> anyhow::Result<bool> {
-    let library_id = match known_library_id {
-        Some(value) => value.to_string(),
-        None => {
-            let Some(row) = series.load_series_library_id(series_id).await? else {
-                return Ok(false);
-            };
-            row
-        }
-    };
-
-    if let Some(authorized_libraries) = context.authorized_library_ids.as_ref()
-        && !authorized_libraries
-            .iter()
-            .any(|candidate| candidate.as_str() == library_id.as_str())
-    {
-        return Ok(false);
-    }
-
-    let Some(restrictions) = context.restrictions.as_ref() else {
-        return Ok(true);
-    };
-
-    let restriction_record = series.load_series_restrictions(series_id).await?;
-    Ok(content_allowed_by_restrictions(
-        restrictions,
-        restriction_record.age_rating,
-        &restriction_record.labels,
-    ))
 }
 
 impl<'a, C> CollectionMutationService<'a, C>
@@ -946,6 +1034,21 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+
+        async fn load_persisted_collection_series_ids_for_ids(
+            &self,
+            collection_ids: &[String],
+        ) -> anyhow::Result<Vec<(String, String)>> {
+            let mut rows = Vec::new();
+            for collection_id in collection_ids {
+                if let Some(series_ids) = self.collection_series.get(collection_id) {
+                    for series_id in series_ids {
+                        rows.push((collection_id.clone(), series_id.clone()));
+                    }
+                }
+            }
+            Ok(rows)
+        }
     }
 
     #[async_trait::async_trait]
@@ -1057,6 +1160,38 @@ mod tests {
                 age_rating: None,
                 labels: vec![],
             })
+        }
+
+        async fn load_series_library_ids_for_ids(
+            &self,
+            series_ids: &[String],
+        ) -> anyhow::Result<Vec<(String, String)>> {
+            Ok(series_ids
+                .iter()
+                .filter_map(|series_id| {
+                    self.series_libraries
+                        .get(series_id)
+                        .map(|library_id| (series_id.clone(), library_id.clone()))
+                })
+                .collect())
+        }
+
+        async fn load_series_restrictions_for_ids(
+            &self,
+            series_ids: &[String],
+        ) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>> {
+            Ok(series_ids
+                .iter()
+                .map(|series_id| {
+                    (
+                        series_id.clone(),
+                        PersistedSeriesRestrictionRecord {
+                            age_rating: None,
+                            labels: vec![],
+                        },
+                    )
+                })
+                .collect())
         }
     }
 

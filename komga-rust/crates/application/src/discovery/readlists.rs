@@ -12,9 +12,10 @@ use quick_xml::XmlVersion;
 use quick_xml::events::Event as XmlEvent;
 
 use super::{
-    BookReadModel, DiscoveryPersistedReadlistRecord, PersistedBookResourceRecord,
-    PersistedComicrackMatchCandidateRecord, ReadListReadModel, ReadlistBookPort,
-    ReadlistComicRackMatchPort, ReadlistMutationPort, ReadlistProjectionPort, ReadlistSearchPort,
+    BookReadModel, DiscoveryPersistedReadlistBookRecord, DiscoveryPersistedReadlistRecord,
+    PersistedBookResourceRecord, PersistedComicrackMatchCandidateRecord, ReadListReadModel,
+    ReadlistBookPort, ReadlistComicRackMatchPort, ReadlistMutationPort, ReadlistProjectionPort,
+    ReadlistSearchPort,
 };
 
 const READLIST_SEARCH_CANDIDATE_LIMIT: usize = 1000;
@@ -219,6 +220,8 @@ impl<'a> ReadlistProjectionService<'a> {
     ) -> anyhow::Result<PageEnvelope<ReadListReadModel>> {
         let requested_library_ids =
             library_ids_to_strings(requested_context.authorized_library_ids.as_ref());
+        let visibility_library_ids =
+            library_ids_to_strings(visibility_context.authorized_library_ids.as_ref());
         let mut content = self
             .load_readlists(requested_library_ids.as_deref())
             .await?;
@@ -231,39 +234,123 @@ impl<'a> ReadlistProjectionService<'a> {
             content.retain(|readlist| search_ranks.contains_key(readlist.id.as_str()));
         }
 
-        let mut visible_content = Vec::with_capacity(content.len());
-        for readlist in content {
-            if let Some(library_ids) = query.library_ids.as_ref() {
-                let requested_library_query =
-                    readlist_books_visibility_query(readlist.id.clone(), Some(library_ids.clone()));
-                let Some(requested_library_projection) = self
-                    .visible_readlist_projection(visibility_context, &requested_library_query)
-                    .await?
-                else {
-                    continue;
-                };
-
-                if requested_library_projection.books.is_empty() {
-                    continue;
-                }
-            }
-
-            let visibility_query = readlist_books_visibility_query(readlist.id.clone(), None);
-            let Some(projection) = self
-                .visible_readlist_projection(visibility_context, &visibility_query)
+        let readlist_ids: Vec<String> = content.iter().map(|readlist| readlist.id.clone()).collect();
+        let mut book_rows_by_readlist: HashMap<String, Vec<DiscoveryPersistedReadlistBookRecord>> =
+            HashMap::new();
+        if !readlist_ids.is_empty() {
+            for (readlist_id, row) in self
+                .readlists
+                .load_persisted_readlist_book_rows_for_ids(&readlist_ids)
                 .await?
-            else {
-                continue;
-            };
+            {
+                book_rows_by_readlist
+                    .entry(readlist_id)
+                    .or_default()
+                    .push(row);
+            }
+        }
 
-            if projection.books.is_empty() {
-                if projection.readlist.book_ids.is_empty() && !projection.readlist.filtered {
-                    visible_content.push(projection.readlist);
+        let mut seen_book_ids = std::collections::HashSet::new();
+        let all_book_ids: Vec<String> = book_rows_by_readlist
+            .values()
+            .flatten()
+            .map(|row| row.book_id.clone())
+            .filter(|book_id| seen_book_ids.insert(book_id.clone()))
+            .collect();
+        let user_id = visibility_context
+            .user_id
+            .as_ref()
+            .map(|user_id| user_id.as_str());
+        let resources: HashMap<String, PersistedBookResourceRecord> = if all_book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_resources_for_ids(&all_book_ids)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let details: HashMap<String, BookReadModel> = if all_book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_details_for_ids(&all_book_ids, user_id)
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        let mut visible_content = Vec::with_capacity(content.len());
+        for mut readlist in content {
+            let book_rows = book_rows_by_readlist.get(&readlist.id);
+
+            if let Some(library_ids) = query.library_ids.as_ref() {
+                let has_visible_book = book_rows.is_some_and(|rows| {
+                    rows.iter().any(|row| {
+                        library_ids
+                            .iter()
+                            .any(|library_id| library_id == &row.library_id)
+                            && resources.get(&row.book_id).is_some_and(|resource| {
+                                book_resource_allowed(visibility_context, resource)
+                            })
+                            && details.contains_key(&row.book_id)
+                    })
+                });
+                if !has_visible_book {
+                    continue;
+                }
+            }
+
+            let mut visible_books = Vec::new();
+            if let Some(rows) = book_rows {
+                for row in rows {
+                    if visibility_library_ids
+                        .as_ref()
+                        .is_some_and(|ids| !contains_id(ids, &row.library_id))
+                    {
+                        continue;
+                    }
+                    let Some(resource) = resources.get(&row.book_id) else {
+                        continue;
+                    };
+                    if !book_resource_allowed(visibility_context, resource) {
+                        continue;
+                    }
+                    let Some(detail) = details.get(&row.book_id) else {
+                        continue;
+                    };
+                    visible_books.push(detail.clone());
+                }
+            }
+
+            let visible_book_ids: Vec<String> =
+                visible_books.iter().map(|book| book.id.clone()).collect();
+            let visibility_book_ids: Vec<String> = match book_rows {
+                Some(rows) => rows
+                    .iter()
+                    .filter(|row| {
+                        visibility_library_ids
+                            .as_ref()
+                            .is_none_or(|ids| contains_id(ids, &row.library_id))
+                    })
+                    .map(|row| row.book_id.clone())
+                    .collect(),
+                None => Vec::new(),
+            };
+            let filtered_by_visibility_scope =
+                visibility_book_ids.len() < book_rows.map_or(0, Vec::len);
+            readlist.filtered =
+                filtered_by_visibility_scope || visibility_book_ids != visible_book_ids;
+            readlist.book_ids = visible_book_ids;
+
+            if visible_books.is_empty() {
+                if readlist.book_ids.is_empty() && !readlist.filtered {
+                    visible_content.push(readlist);
                 }
                 continue;
             }
 
-            visible_content.push(projection.readlist);
+            visible_content.push(readlist);
         }
 
         sort_readlists(&mut visible_content, query.sort, search_ranks.as_ref());
@@ -415,23 +502,105 @@ impl<'a> ReadlistProjectionService<'a> {
         visibility_context: &DiscoveryQueryContext,
         book_id: &str,
     ) -> anyhow::Result<Vec<ReadListReadModel>> {
-        let mut readlists = self.load_readlists(candidate_library_ids).await?;
-        readlists.retain(|readlist| readlist.book_ids.iter().any(|id| id == book_id));
+        let mut content = self.load_readlists(candidate_library_ids).await?;
+        content.retain(|readlist| readlist.book_ids.iter().any(|id| id == book_id));
 
-        let mut visible_readlists = Vec::with_capacity(readlists.len());
-        for readlist in readlists {
-            let query = readlist_books_visibility_query(readlist.id.clone(), None);
-            let Some(projection) = self
-                .visible_readlist_projection(visibility_context, &query)
+        let readlist_ids: Vec<String> = content.iter().map(|readlist| readlist.id.clone()).collect();
+        let mut book_rows_by_readlist: HashMap<String, Vec<DiscoveryPersistedReadlistBookRecord>> =
+            HashMap::new();
+        if !readlist_ids.is_empty() {
+            for (readlist_id, row) in self
+                .readlists
+                .load_persisted_readlist_book_rows_for_ids(&readlist_ids)
                 .await?
-            else {
-                continue;
-            };
-            if !projection.readlist.book_ids.iter().any(|id| id == book_id) {
+            {
+                book_rows_by_readlist
+                    .entry(readlist_id)
+                    .or_default()
+                    .push(row);
+            }
+        }
+
+        let mut seen_book_ids = std::collections::HashSet::new();
+        let all_book_ids: Vec<String> = book_rows_by_readlist
+            .values()
+            .flatten()
+            .map(|row| row.book_id.clone())
+            .filter(|book_id| seen_book_ids.insert(book_id.clone()))
+            .collect();
+        let user_id = visibility_context
+            .user_id
+            .as_ref()
+            .map(|user_id| user_id.as_str());
+        let resources: HashMap<String, PersistedBookResourceRecord> = if all_book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_resources_for_ids(&all_book_ids)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let details: HashMap<String, BookReadModel> = if all_book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_details_for_ids(&all_book_ids, user_id)
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        let visibility_library_ids =
+            library_ids_to_strings(visibility_context.authorized_library_ids.as_ref());
+        let mut visible_readlists = Vec::with_capacity(content.len());
+        for mut readlist in content {
+            let rows = book_rows_by_readlist.get(&readlist.id);
+            let mut visible_book_ids = Vec::new();
+            if let Some(rows) = rows {
+                for row in rows {
+                    if visibility_library_ids
+                        .as_ref()
+                        .is_some_and(|ids| !contains_id(ids, &row.library_id))
+                    {
+                        continue;
+                    }
+                    let Some(resource) = resources.get(&row.book_id) else {
+                        continue;
+                    };
+                    if !book_resource_allowed(visibility_context, resource) {
+                        continue;
+                    }
+                    let Some(detail) = details.get(&row.book_id) else {
+                        continue;
+                    };
+                    visible_book_ids.push(detail.id.clone());
+                }
+            }
+
+            if !visible_book_ids.iter().any(|id| id == book_id) {
                 continue;
             }
 
-            visible_readlists.push(projection.readlist);
+            let visibility_book_ids: Vec<String> = match rows {
+                Some(rows) => rows
+                    .iter()
+                    .filter(|row| {
+                        visibility_library_ids
+                            .as_ref()
+                            .is_none_or(|ids| contains_id(ids, &row.library_id))
+                    })
+                    .map(|row| row.book_id.clone())
+                    .collect(),
+                None => Vec::new(),
+            };
+            let filtered_by_visibility_scope =
+                visibility_book_ids.len() < rows.map_or(0, Vec::len);
+            readlist.filtered =
+                filtered_by_visibility_scope || visibility_book_ids != visible_book_ids;
+            readlist.book_ids = visible_book_ids;
+
+            visible_readlists.push(readlist);
         }
 
         Ok(visible_readlists)
@@ -443,19 +612,38 @@ impl<'a> ReadlistProjectionService<'a> {
     ) -> anyhow::Result<Vec<ReadListReadModel>> {
         let rows = self.readlists.load_persisted_readlists().await?;
 
+        let readlist_ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+        let mut book_rows_by_readlist: HashMap<String, Vec<DiscoveryPersistedReadlistBookRecord>> =
+            HashMap::new();
+        if !readlist_ids.is_empty() {
+            for (readlist_id, row) in self
+                .readlists
+                .load_persisted_readlist_book_rows_for_ids(&readlist_ids)
+                .await?
+            {
+                book_rows_by_readlist
+                    .entry(readlist_id)
+                    .or_default()
+                    .push(row);
+            }
+        }
+
         let mut readlists = Vec::with_capacity(rows.len());
         for row in rows {
             let id = row.id.clone();
-            let visibility = load_readlist_book_ids(self.readlists, &id, library_ids).await?;
-            if library_ids.is_some() && visibility.book_ids.is_empty() {
+            let book_rows = book_rows_by_readlist.remove(&id).unwrap_or_default();
+            let total_count = book_rows.len();
+            let book_ids = book_rows
+                .into_iter()
+                .filter(|row| library_ids.is_none_or(|ids| contains_id(ids, &row.library_id)))
+                .map(|row| row.book_id)
+                .collect::<Vec<_>>();
+            if library_ids.is_some() && book_ids.is_empty() {
                 continue;
             }
 
-            readlists.push(readlist_from_record(
-                row,
-                visibility.book_ids,
-                visibility.filtered,
-            ));
+            let filtered = book_ids.len() < total_count;
+            readlists.push(readlist_from_record(row, book_ids, filtered));
         }
 
         Ok(readlists)
@@ -525,8 +713,28 @@ impl<'a> ReadlistProjectionService<'a> {
             .readlists
             .load_persisted_readlist_book_rows(&query.readlist_id)
             .await?;
-        let mut visible = Vec::new();
 
+        let book_ids: Vec<String> = rows.iter().map(|row| row.book_id.clone()).collect();
+        let resources: HashMap<String, PersistedBookResourceRecord> = if book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_resources_for_ids(&book_ids)
+                .await?
+                .into_iter()
+                .collect()
+        };
+        let details: HashMap<String, BookReadModel> = if book_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.books
+                .load_persisted_book_details_for_ids(&book_ids, user_id)
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        let mut visible = Vec::new();
         for row in rows {
             if authorized_library_ids
                 .as_ref()
@@ -542,30 +750,22 @@ impl<'a> ReadlistProjectionService<'a> {
                 continue;
             }
 
-            let Some(resource) = self
-                .books
-                .load_persisted_book_resource(&row.book_id)
-                .await?
-            else {
+            let Some(resource) = resources.get(&row.book_id) else {
                 continue;
             };
-            if !book_resource_allowed(context, &resource) {
+            if !book_resource_allowed(context, resource) {
                 continue;
             }
 
-            let Some(detail) = self
-                .books
-                .load_persisted_book_detail(&row.book_id, user_id)
-                .await?
-            else {
+            let Some(detail) = details.get(&row.book_id) else {
                 continue;
             };
 
-            if !matches_readlist_book_filters(&detail, query) {
+            if !matches_readlist_book_filters(detail, query) {
                 continue;
             }
 
-            visible.push(detail);
+            visible.push(detail.clone());
         }
 
         Ok(visible)
@@ -1621,6 +1821,21 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+
+        async fn load_persisted_readlist_book_rows_for_ids(
+            &self,
+            readlist_ids: &[String],
+        ) -> anyhow::Result<Vec<(String, DiscoveryPersistedReadlistBookRecord)>> {
+            let mut rows = Vec::new();
+            for readlist_id in readlist_ids {
+                if let Some(book_rows) = self.readlist_books.get(readlist_id) {
+                    for book_row in book_rows {
+                        rows.push((readlist_id.clone(), book_row.clone()));
+                    }
+                }
+            }
+            Ok(rows)
+        }
     }
 
     #[async_trait::async_trait]
@@ -1701,6 +1916,35 @@ mod tests {
             _user_id: Option<&str>,
         ) -> anyhow::Result<Option<BookReadModel>> {
             Ok(self.books.get(book_id).cloned())
+        }
+
+        async fn load_persisted_book_resources_for_ids(
+            &self,
+            book_ids: &[String],
+        ) -> anyhow::Result<Vec<(String, PersistedBookResourceRecord)>> {
+            Ok(book_ids
+                .iter()
+                .filter_map(|book_id| {
+                    self.book_resources
+                        .get(book_id)
+                        .map(|resource| (book_id.clone(), resource.clone()))
+                })
+                .collect())
+        }
+
+        async fn load_persisted_book_details_for_ids(
+            &self,
+            book_ids: &[String],
+            _user_id: Option<&str>,
+        ) -> anyhow::Result<Vec<(String, BookReadModel)>> {
+            Ok(book_ids
+                .iter()
+                .filter_map(|book_id| {
+                    self.books
+                        .get(book_id)
+                        .map(|book| (book_id.clone(), book.clone()))
+                })
+                .collect())
         }
     }
 

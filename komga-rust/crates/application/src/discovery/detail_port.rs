@@ -198,6 +198,17 @@ pub trait ReadlistBookPort: Send + Sync {
         book_id: &str,
         user_id: Option<&str>,
     ) -> anyhow::Result<Option<BookReadModel>>;
+
+    async fn load_persisted_book_resources_for_ids(
+        &self,
+        book_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedBookResourceRecord)>>;
+
+    async fn load_persisted_book_details_for_ids(
+        &self,
+        book_ids: &[String],
+        user_id: Option<&str>,
+    ) -> anyhow::Result<Vec<(String, BookReadModel)>>;
 }
 
 #[async_trait::async_trait]
@@ -212,6 +223,17 @@ pub trait BookDetailPort: Send + Sync {
         book_id: &str,
         user_id: Option<&str>,
     ) -> anyhow::Result<Option<BookReadModel>>;
+
+    async fn load_persisted_book_resources_for_ids(
+        &self,
+        book_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedBookResourceRecord)>>;
+
+    async fn load_persisted_book_details_for_ids(
+        &self,
+        book_ids: &[String],
+        user_id: Option<&str>,
+    ) -> anyhow::Result<Vec<(String, BookReadModel)>>;
 
     async fn load_persisted_book_sibling_id(
         &self,
@@ -277,6 +299,21 @@ where
     ) -> anyhow::Result<Option<BookReadModel>> {
         BookDetailPort::load_persisted_book_detail(self, book_id, user_id).await
     }
+
+    async fn load_persisted_book_resources_for_ids(
+        &self,
+        book_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedBookResourceRecord)>> {
+        BookDetailPort::load_persisted_book_resources_for_ids(self, book_ids).await
+    }
+
+    async fn load_persisted_book_details_for_ids(
+        &self,
+        book_ids: &[String],
+        user_id: Option<&str>,
+    ) -> anyhow::Result<Vec<(String, BookReadModel)>> {
+        BookDetailPort::load_persisted_book_details_for_ids(self, book_ids, user_id).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -287,6 +324,16 @@ pub trait SeriesDetailPort: Send + Sync {
         &self,
         series_id: &str,
     ) -> anyhow::Result<PersistedSeriesRestrictionRecord>;
+
+    async fn load_series_library_ids_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>>;
+
+    async fn load_series_restrictions_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>>;
 
     async fn load_persisted_series_resource(
         &self,
@@ -366,6 +413,16 @@ pub trait CollectionSeriesPort: Send + Sync {
         &self,
         series_id: &str,
     ) -> anyhow::Result<PersistedSeriesRestrictionRecord>;
+
+    async fn load_series_library_ids_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>>;
+
+    async fn load_series_restrictions_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>>;
 }
 
 #[async_trait::async_trait]
@@ -383,6 +440,20 @@ where
     ) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
         SeriesDetailPort::load_series_restrictions(self, series_id).await
     }
+
+    async fn load_series_library_ids_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        SeriesDetailPort::load_series_library_ids_for_ids(self, series_ids).await
+    }
+
+    async fn load_series_restrictions_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>> {
+        SeriesDetailPort::load_series_restrictions_for_ids(self, series_ids).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -397,6 +468,11 @@ pub trait CollectionPort: Send + Sync {
         &self,
         collection_id: &str,
     ) -> anyhow::Result<Vec<String>>;
+
+    async fn load_persisted_collection_series_ids_for_ids(
+        &self,
+        collection_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>>;
 
     async fn load_persisted_collection_detail(
         &self,
@@ -443,6 +519,11 @@ pub trait CollectionProjectionPort: Send + Sync {
         &self,
         collection_id: &str,
     ) -> anyhow::Result<Vec<String>>;
+
+    async fn load_persisted_collection_series_ids_for_ids(
+        &self,
+        collection_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>>;
 }
 
 #[async_trait::async_trait]
@@ -465,6 +546,13 @@ where
         collection_id: &str,
     ) -> anyhow::Result<Vec<String>> {
         CollectionPort::load_persisted_collection_series_ids(self, collection_id).await
+    }
+
+    async fn load_persisted_collection_series_ids_for_ids(
+        &self,
+        collection_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        CollectionPort::load_persisted_collection_series_ids_for_ids(self, collection_ids).await
     }
 
     async fn load_persisted_collection_detail(
@@ -589,6 +677,11 @@ pub trait ReadlistProjectionPort: Send + Sync {
         &self,
         readlist_id: &str,
     ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>>;
+
+    async fn load_persisted_readlist_book_rows_for_ids(
+        &self,
+        readlist_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, DiscoveryPersistedReadlistBookRecord)>>;
 }
 
 #[async_trait::async_trait]

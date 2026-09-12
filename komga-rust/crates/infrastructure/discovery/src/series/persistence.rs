@@ -47,7 +47,55 @@ async fn fetch_persisted_series_summary_rows(
     ids: Option<&[String]>,
 ) -> Result<Vec<SqliteRow>, Error> {
     let mut query = QueryBuilder::<Sqlite>::new(
-        r#"SELECT s.ID,
+        r#"WITH series_sharing_labels AS (
+    SELECT sms.SERIES_ID AS ID,
+           GROUP_CONCAT(sms.LABEL, char(30) ORDER BY sms.rowid) AS VALUE
+    FROM SERIES_METADATA_SHARING sms
+    GROUP BY sms.SERIES_ID
+),
+series_genres AS (
+    SELECT smg.SERIES_ID AS ID,
+           GROUP_CONCAT(smg.GENRE, char(30) ORDER BY smg.rowid) AS VALUE
+    FROM SERIES_METADATA_GENRE smg
+    GROUP BY smg.SERIES_ID
+),
+series_tags AS (
+    SELECT smt.SERIES_ID AS ID,
+           GROUP_CONCAT(smt.TAG, char(30) ORDER BY smt.rowid) AS VALUE
+    FROM SERIES_METADATA_TAG smt
+    GROUP BY smt.SERIES_ID
+),
+series_alternate_titles AS (
+    SELECT smat.SERIES_ID AS ID,
+           GROUP_CONCAT(CASE
+               WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
+               ELSE smat.LABEL || '::' || smat.TITLE
+           END, char(30) ORDER BY smat.rowid) AS VALUE
+    FROM SERIES_METADATA_ALTERNATE_TITLE smat
+    GROUP BY smat.SERIES_ID
+),
+series_links AS (
+    SELECT sml.SERIES_ID AS ID,
+           GROUP_CONCAT(sml.LABEL || char(31) || sml.URL, char(30) ORDER BY sml.rowid) AS VALUE
+    FROM SERIES_METADATA_LINK sml
+    GROUP BY sml.SERIES_ID
+),
+book_aggregation_authors AS (
+    SELECT bmaa.SERIES_ID AS ID,
+           GROUP_CONCAT(CASE
+               WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
+               ELSE bmaa.NAME || '::' || bmaa.ROLE
+           END, char(30) ORDER BY bmaa.rowid) AS VALUE
+    FROM BOOK_METADATA_AGGREGATION_AUTHOR bmaa
+    GROUP BY bmaa.SERIES_ID
+),
+book_aggregation_tags AS (
+    SELECT bmat.SERIES_ID AS ID,
+           GROUP_CONCAT(bmat.TAG, char(30) ORDER BY bmat.rowid) AS VALUE
+    FROM BOOK_METADATA_AGGREGATION_TAG bmat
+    GROUP BY bmat.SERIES_ID
+)
+SELECT s.ID,
                   s.LIBRARY_ID,
                   s.URL AS URL,
                   s.CREATED_DATE,
@@ -87,58 +135,22 @@ async fn fetch_persisted_series_summary_rows(
                    COALESCE(bma.CREATED_DATE, s.CREATED_DATE) AS BOOKS_METADATA_CREATED,
                    COALESCE(bma.LAST_MODIFIED_DATE, s.LAST_MODIFIED_DATE) AS BOOKS_METADATA_LAST_MODIFIED,
                    s.NAME AS NAME,
-                   COALESCE((SELECT GROUP_CONCAT(LABEL, char(30))
-                             FROM (SELECT sms.LABEL AS LABEL
-                                   FROM SERIES_METADATA_SHARING sms
-                                   WHERE sms.SERIES_ID = s.ID
-                                   ORDER BY sms.rowid)), '') AS LABELS,
-                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT smg.GENRE AS GENRE
-                                  FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID
-                                  ORDER BY smg.rowid)), '') AS GENRES,
-                  COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
-                            FROM (SELECT smt.TAG AS TAG
-                                  FROM SERIES_METADATA_TAG smt
-                                  WHERE smt.SERIES_ID = s.ID
-                                  ORDER BY smt.rowid)), '') AS TAGS,
-                  COALESCE(
-                    (SELECT GROUP_CONCAT(ALTERNATE_TITLE, char(30))
-                     FROM (SELECT CASE
-                             WHEN smat.LABEL IS NULL OR smat.LABEL = '' THEN smat.TITLE
-                             ELSE smat.LABEL || '::' || smat.TITLE
-                           END AS ALTERNATE_TITLE
-                           FROM SERIES_METADATA_ALTERNATE_TITLE smat
-                           WHERE smat.SERIES_ID = s.ID
-                           ORDER BY smat.rowid)),
-                    ''
-                  ) AS ALTERNATE_TITLES,
-                  COALESCE(
-                    (SELECT GROUP_CONCAT(LINK, char(30))
-                     FROM (SELECT sml.LABEL || char(31) || sml.URL AS LINK
-                           FROM SERIES_METADATA_LINK sml
-                           WHERE sml.SERIES_ID = s.ID
-                           ORDER BY sml.rowid)),
-                    ''
-                  ) AS LINKS,
-                  COALESCE(
-                    (SELECT GROUP_CONCAT(AUTHOR, char(30))
-                     FROM (SELECT CASE
-                             WHEN bmaa.ROLE IS NULL OR bmaa.ROLE = '' THEN bmaa.NAME
-                             ELSE bmaa.NAME || '::' || bmaa.ROLE
-                           END AS AUTHOR
-                           FROM BOOK_METADATA_AGGREGATION_AUTHOR bmaa
-                           WHERE bmaa.SERIES_ID = s.ID
-                           ORDER BY bmaa.rowid)),
-                    ''
-                  ) AS BOOKS_METADATA_AUTHORS,
-                  COALESCE((SELECT GROUP_CONCAT(TAG, char(30))
-                            FROM (SELECT bmat.TAG AS TAG
-                                  FROM BOOK_METADATA_AGGREGATION_TAG bmat
-                                  WHERE bmat.SERIES_ID = s.ID
-                                  ORDER BY bmat.rowid)), '') AS BOOKS_METADATA_TAGS
+                   COALESCE(ssl.VALUE, '') AS LABELS,
+                  COALESCE(sg.VALUE, '') AS GENRES,
+                  COALESCE(st.VALUE, '') AS TAGS,
+                  COALESCE(sat.VALUE, '') AS ALTERNATE_TITLES,
+                  COALESCE(sl.VALUE, '') AS LINKS,
+                  COALESCE(baa.VALUE, '') AS BOOKS_METADATA_AUTHORS,
+                  COALESCE(baat.VALUE, '') AS BOOKS_METADATA_TAGS
            FROM SERIES s
            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+           LEFT JOIN series_sharing_labels ssl ON ssl.ID = s.ID
+           LEFT JOIN series_genres sg ON sg.ID = s.ID
+           LEFT JOIN series_tags st ON st.ID = s.ID
+           LEFT JOIN series_alternate_titles sat ON sat.ID = s.ID
+           LEFT JOIN series_links sl ON sl.ID = s.ID
+           LEFT JOIN book_aggregation_authors baa ON baa.ID = s.ID
+           LEFT JOIN book_aggregation_tags baat ON baat.ID = s.ID
            LEFT JOIN BOOK_METADATA_AGGREGATION bma ON bma.SERIES_ID = s.ID"#,
     );
 

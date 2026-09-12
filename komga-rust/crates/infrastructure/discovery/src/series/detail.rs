@@ -156,28 +156,34 @@ pub(crate) async fn load_persisted_series_collections(
     .await
     .context("query persisted series collections")?;
 
+    let collection_ids: Vec<String> =
+        rows.iter().map(|row| row.get::<String, _>("ID")).collect();
+    let mut series_ids_by_collection: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if !collection_ids.is_empty() {
+        for (collection_id, series_id) in crate::collections::load_persisted_collection_series_ids_for_ids(
+            pool,
+            &collection_ids,
+        )
+        .await?
+        {
+            series_ids_by_collection
+                .entry(collection_id)
+                .or_default()
+                .push(series_id);
+        }
+    }
+
     let mut collections = Vec::with_capacity(rows.len());
     for row in rows {
         let collection_id = row.get::<String, _>("ID");
-        let series_ids_rows = sqlx::query(
-            r#"SELECT SERIES_ID
-             FROM COLLECTION_SERIES
-             WHERE COLLECTION_ID = ?
-             ORDER BY NUMBER ASC"#,
-        )
-        .bind(collection_id.clone())
-        .fetch_all(pool)
-        .await
-        .context("query persisted collection series ids")?;
-
         collections.push(PersistedSeriesCollectionRecord {
-            id: collection_id,
+            id: collection_id.clone(),
             name: row.get::<String, _>("NAME"),
             ordered: row.get::<bool, _>("ORDERED"),
-            series_ids: series_ids_rows
-                .into_iter()
-                .map(|series_row| series_row.get::<String, _>("SERIES_ID"))
-                .collect(),
+            series_ids: series_ids_by_collection
+                .remove(&collection_id)
+                .unwrap_or_default(),
             created_date: row.get::<String, _>("CREATED_DATE"),
             last_modified_date: row.get::<String, _>("LAST_MODIFIED_DATE"),
         });

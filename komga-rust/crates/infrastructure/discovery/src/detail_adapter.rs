@@ -328,6 +328,21 @@ impl BookDetailPort for DiscoveryDetailAccess {
         books::load_persisted_book_detail(self.db.read_pool(), book_id, user_id).await
     }
 
+    async fn load_persisted_book_resources_for_ids(
+        &self,
+        book_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedBookResourceRecord)>> {
+        books::load_persisted_book_resources_for_ids(self.db.read_pool(), book_ids).await
+    }
+
+    async fn load_persisted_book_details_for_ids(
+        &self,
+        book_ids: &[String],
+        user_id: Option<&str>,
+    ) -> anyhow::Result<Vec<(String, BookReadModel)>> {
+        books::load_persisted_book_details_for_ids(self.db.read_pool(), book_ids, user_id).await
+    }
+
     async fn load_persisted_book_sibling_id(
         &self,
         book_id: &str,
@@ -364,6 +379,20 @@ impl SeriesDetailPort for DiscoveryDetailAccess {
         series_id: &str,
     ) -> anyhow::Result<PersistedSeriesRestrictionRecord> {
         collections::load_series_restrictions(self.db.read_pool(), series_id).await
+    }
+
+    async fn load_series_library_ids_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        collections::load_series_library_ids_for_ids(self.db.read_pool(), series_ids).await
+    }
+
+    async fn load_series_restrictions_for_ids(
+        &self,
+        series_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>> {
+        collections::load_series_restrictions_for_ids(self.db.read_pool(), series_ids).await
     }
 
     async fn load_persisted_series_resource(
@@ -478,6 +507,17 @@ impl CollectionPort for DiscoveryDetailAccess {
         collections::load_persisted_collection_series_ids(self.db.read_pool(), collection_id).await
     }
 
+    async fn load_persisted_collection_series_ids_for_ids(
+        &self,
+        collection_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, String)>> {
+        collections::load_persisted_collection_series_ids_for_ids(
+            self.db.read_pool(),
+            collection_ids,
+        )
+        .await
+    }
+
     async fn load_persisted_collection_detail(
         &self,
         collection_id: &str,
@@ -552,6 +592,14 @@ impl ReadlistProjectionPort for DiscoveryDetailAccess {
         readlist_id: &str,
     ) -> anyhow::Result<Vec<DiscoveryPersistedReadlistBookRecord>> {
         readlists::load_persisted_readlist_book_rows(self.db.read_pool(), readlist_id).await
+    }
+
+    async fn load_persisted_readlist_book_rows_for_ids(
+        &self,
+        readlist_ids: &[String],
+    ) -> anyhow::Result<Vec<(String, DiscoveryPersistedReadlistBookRecord)>> {
+        readlists::load_persisted_readlist_book_rows_for_ids(self.db.read_pool(), readlist_ids)
+            .await
     }
 }
 
