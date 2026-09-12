@@ -13,7 +13,6 @@ pub(crate) mod manifest_renderer;
 mod manifests;
 pub(crate) mod media_helpers;
 mod operations;
-mod page_resolution;
 mod pages;
 pub(crate) mod read_progress;
 pub(crate) mod thumbnails;

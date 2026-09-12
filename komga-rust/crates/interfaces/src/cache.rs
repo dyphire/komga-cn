@@ -88,6 +88,25 @@ pub(crate) fn asset_etag(bytes: &[u8]) -> String {
     format!("\"{hex}\"")
 }
 
+/// ETag derived from the source file's mtime + size, salted with a request
+/// variant key (page number / output format). Bytes served for a given
+/// (source file, variant) are deterministic, so this avoids hashing the full
+/// response body on every conditional request. Falls back to `None` when the
+/// file metadata cannot be read; callers then use the content hash instead.
+pub(crate) fn asset_file_etag(path: &Path, key: &str) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(UNIX_EPOCH).ok()?;
+    let mtime_nanos =
+        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
+    let digest = Sha256::digest(format!("{mtime_nanos}:{}:{key}", metadata.len()).as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    Some(format!("\"{hex}\""))
+}
+
 pub(crate) fn format_http_date(time: SystemTime) -> Option<String> {
     let duration = time.duration_since(UNIX_EPOCH).ok()?;
     let timestamp = i64::try_from(duration.as_secs()).ok()?;

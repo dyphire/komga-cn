@@ -59,6 +59,9 @@ pub struct BookMediaDeliveryAsset {
     pub file_name: Option<String>,
     pub source_file: Option<PathBuf>,
     pub disposition: BookMediaDeliveryDisposition,
+    /// Salt for a file-metadata-derived ETag (page number / output format).
+    /// `None` falls back to hashing the response body.
+    pub etag_key: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -435,6 +438,7 @@ where
             file_name: Some(media.file_name),
             source_file: Some(media.file_path),
             disposition: BookMediaDeliveryDisposition::Attachment,
+            etag_key: None,
         })
     }
 
@@ -682,6 +686,7 @@ where
             file_name: None,
             source_file: Some(media.file_path),
             disposition: BookMediaDeliveryDisposition::None,
+            etag_key: Some(format!("{page_number}:{}", rendered.format.content_type())),
         })
     }
 
@@ -1074,6 +1079,7 @@ fn page_asset(
         )),
         source_file: Some(media.file_path.clone()),
         disposition: BookMediaDeliveryDisposition::Inline,
+        etag_key: Some(format!("{page_number}:{content_type}")),
     }
 }
 
