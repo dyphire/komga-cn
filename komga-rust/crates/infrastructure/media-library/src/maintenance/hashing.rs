@@ -30,7 +30,7 @@ pub async fn hash_book_pages(
         return Ok(());
     }
 
-    persist_book_page_hashes_from_media_content(runtime.database().read_pool(), book_id)
+    persist_book_page_hashes_from_media_content(runtime.database().write_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)
 }
