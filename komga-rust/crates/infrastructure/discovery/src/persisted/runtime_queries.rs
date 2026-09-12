@@ -243,6 +243,48 @@ pub(crate) async fn load_series_read_progress_counts(
     Ok(counts)
 }
 
+pub(crate) async fn load_series_read_progress_counts_for_ids(
+    pool: &SqlitePool,
+    user_id: &str,
+    ids: &[String],
+) -> anyhow::Result<HashMap<String, SeriesReadProgressCounts>> {
+    let mut counts = HashMap::new();
+    for chunk in ids.chunks(500) {
+        // Manual IN-list assembly on the QueryBuilder: Separated cannot be
+        // combined with a leading push_bind (it misaligns the placeholder
+        // count and SQLite rejects the stray "?").
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT SERIES_ID, READ_COUNT, IN_PROGRESS_COUNT              FROM READ_PROGRESS_SERIES              WHERE USER_ID = ",
+        );
+        query.push_bind(user_id);
+        query.push(" AND SERIES_ID IN (");
+        let mut first = true;
+        for id in chunk {
+            if !first {
+                query.push(", ");
+            }
+            first = false;
+            query.push_bind(id);
+        }
+        query.push(")");
+        let rows = query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query series read-progress counts for ids")?;
+        for row in rows {
+            counts.insert(
+                row.get::<String, _>("SERIES_ID"),
+                SeriesReadProgressCounts {
+                    read_count: row.get::<i64, _>("READ_COUNT"),
+                    in_progress_count: row.get::<i64, _>("IN_PROGRESS_COUNT"),
+                },
+            );
+        }
+    }
+    Ok(counts)
+}
+
 pub(crate) async fn load_series_read_dates(
     pool: &SqlitePool,
     user_id: &str,
