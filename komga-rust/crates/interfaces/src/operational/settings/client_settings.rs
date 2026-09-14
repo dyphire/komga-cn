@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use serde_json::Value;
 
 use crate::contracts::client_settings::{client_settings_global_dto, client_settings_user_dto};
-use crate::identity_access::auth::{Admin, Authenticated, resolved_auth_user};
+use crate::identity_access::auth::{Admin, Authenticated, resolved_request_auth_user};
 use crate::state::OperationalApiState;
 use komga_application::identity_access::user_id;
 use komga_application::operational::{
@@ -19,7 +19,7 @@ pub(crate) async fn get_client_settings_global(
     State(app): State<OperationalApiState>,
     headers: HeaderMap,
 ) -> Response {
-    let include_unauthorized_only = match resolved_auth_user(&app.identity, &headers) {
+    let include_unauthorized_only = match resolved_request_auth_user(&app.identity, &headers).await {
         Ok(user) => user.is_none(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };

@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use komga_application::identity_access::AuthUser;
 
-use crate::identity_access::auth::resolved_auth_user;
+use crate::identity_access::auth::resolved_request_auth_user;
 use crate::request_urls::{opds_auth_json, request_base_url};
 use crate::state::IdentityState;
 
@@ -42,7 +42,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let user = match resolved_auth_user(&identity, &parts.headers) {
+        let user = match resolved_request_auth_user(&identity, &parts.headers).await {
             Ok(Some(user)) => user,
             Ok(None) => return Err(opds_v1_basic_unauthorized_response()),
             Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
@@ -60,7 +60,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let identity = IdentityState::from_ref(state);
-        let user = match resolved_auth_user(&identity, &parts.headers) {
+        let user = match resolved_request_auth_user(&identity, &parts.headers).await {
             Ok(Some(user)) => user,
             Ok(None) => return Err(opds_catalog_unauthorized_response(&parts.headers)),
             Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
