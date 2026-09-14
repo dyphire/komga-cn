@@ -19,7 +19,7 @@ use crate::contracts::sse::{
     TaskQueueSseDto, ThumbnailBookSseDto, ThumbnailCollectionSseDto, ThumbnailReadListSseDto,
     ThumbnailSeriesSseDto,
 };
-use crate::identity_access::auth::resolved_auth_user;
+use crate::identity_access::auth::resolved_request_auth_user;
 use crate::state::OperationalApiState;
 use komga_application::identity_access::{user_id, user_is_admin};
 
@@ -38,7 +38,7 @@ pub(crate) async fn sse_events(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let user = match resolved_auth_user(&app.identity, &headers) {
+    let user = match resolved_request_auth_user(&app.identity, &headers).await {
         Ok(Some(user)) => user,
         Ok(None) => return StatusCode::UNAUTHORIZED.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
