@@ -13,10 +13,15 @@ async fn analysis_context(paths: &RuntimeDbPaths) -> (MediaLibraryJobContext, Ri
     let riir = RiirDatabase::file_backed(&paths.riir_db_file)
         .await
         .unwrap();
+    let main_db = DatabaseHandle::file_backed(paths.main_db.clone())
+        .await
+        .unwrap();
+    let task_read_pool = main_db.read_pool().clone();
+    let task_write_pool = main_db.write_pool().clone();
     let context = MediaLibraryJobContext::new(
-        DatabaseHandle::file_backed(paths.main_db.clone())
-            .await
-            .unwrap(),
+        main_db,
+        task_read_pool,
+        task_write_pool,
         true,
         true,
         Arc::new(RuntimeSseEventStore::default()),
