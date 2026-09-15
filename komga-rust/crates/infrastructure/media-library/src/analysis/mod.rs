@@ -779,7 +779,7 @@ fn analyze_zip_media_pages(
         )
     });
     let metadata_sources =
-        capture_comicinfo(&mut archive, profile.metadata_source_request().comicinfo);
+        capture_comicinfo(Some(&mut archive), profile.metadata_source_request().comicinfo);
     Ok(AnalyzedMediaFileContents {
         page_count: pages.len() as u64,
         pages,
@@ -795,16 +795,19 @@ fn analyze_zip_media_pages(
 }
 
 fn capture_comicinfo<R: std::io::Read + std::io::Seek>(
-    archive: &mut zip::ZipArchive<R>,
+    archive: Option<&mut zip::ZipArchive<R>>,
     requested: bool,
 ) -> CapturedMetadataDocument {
     if !requested {
         return CapturedMetadataDocument::NotRequested;
     }
-    match read_comicinfo_from_zip_archive(archive) {
-        Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
-        Ok(None) => CapturedMetadataDocument::Absent,
-        Err(error) => CapturedMetadataDocument::Failed(format!("{error:#}")),
+    match archive {
+        Some(archive) => match read_comicinfo_from_zip_archive(archive) {
+            Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
+            Ok(None) => CapturedMetadataDocument::Absent,
+            Err(error) => CapturedMetadataDocument::Failed(format!("{error:#}")),
+        },
+        None => CapturedMetadataDocument::Failed("archive unavailable".to_string()),
     }
 }
 
@@ -817,7 +820,7 @@ fn analyze_epub_media_pages(
     let mut archive = zip::ZipArchive::new(file).context("open EPUB archive for analysis")?;
     let analysis = analyze_epub_archive(&mut archive, request.epub)
         .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
-    let mut archive = if profile.include_dimensions() {
+    let mut archive = if profile.include_dimensions() || request.comicinfo {
         let file = std::fs::File::open(file_path).map_err(|error| {
             anyhow::anyhow!(error).context(format!(
                 "open EPUB for dimensions '{}': ",
@@ -885,7 +888,7 @@ fn analyze_epub_media_pages(
         files: analysis.files,
         media_files,
         metadata_sources: CapturedMetadataSources {
-            comicinfo: capture_comicinfo(&mut archive, request.comicinfo),
+            comicinfo: capture_comicinfo(archive.as_mut(), request.comicinfo),
             epub: if request.epub {
                 analysis
                     .package_document

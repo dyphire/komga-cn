@@ -10,10 +10,21 @@ use super::scan_models::{
     ScannedSidecarSource, ScannedSidecarType,
 };
 
+pub(super) struct ScannedDirectory {
+    pub path: PathBuf,
+    pub metadata: fs::Metadata,
+    pub file_entries: Vec<ScannedDirectoryFileEntry>,
+}
+
+pub(super) struct ScannedDirectoryFileEntry {
+    pub path: PathBuf,
+    pub metadata: fs::Metadata,
+}
+
 pub(super) fn collect_series_directories(
     current: &Path,
     scan_config: &LibraryScanConfig,
-    discovered: &mut Vec<PathBuf>,
+    discovered: &mut Vec<ScannedDirectory>,
 ) -> anyhow::Result<()> {
     if is_hidden_path(current)
         || is_library_path_excluded(current, &scan_config.scan_directory_exclusions)
@@ -30,6 +41,7 @@ pub(super) fn collect_series_directories(
 
     let mut has_supported_book = false;
     let mut children = Vec::new();
+    let mut file_entries = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| {
             anyhow::anyhow!(error).context(format!(
@@ -38,9 +50,7 @@ pub(super) fn collect_series_directories(
             ))
         })?;
         let path = entry.path();
-        if is_hidden_path(path.as_path())
-            || is_library_path_excluded(path.as_path(), &scan_config.scan_directory_exclusions)
-        {
+        if is_hidden_path(path.as_path()) {
             continue;
         }
 
@@ -50,16 +60,31 @@ pub(super) fn collect_series_directories(
                 path.display()
             ))
         })?;
-        if metadata.is_file() && is_supported_book_file(path.as_path(), scan_config) {
-            has_supported_book = true;
-        }
         if metadata.is_dir() {
+            if is_library_path_excluded(path.as_path(), &scan_config.scan_directory_exclusions) {
+                continue;
+            }
             children.push(path);
+        } else if metadata.is_file() {
+            if is_supported_book_file(path.as_path(), scan_config) {
+                has_supported_book = true;
+            }
+            file_entries.push(ScannedDirectoryFileEntry { path, metadata });
         }
     }
 
     if has_supported_book {
-        discovered.push(current.to_path_buf());
+        let directory_metadata = fs::metadata(current).map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "failed to read series directory metadata for '{}': ",
+                current.display()
+            ))
+        })?;
+        discovered.push(ScannedDirectory {
+            path: current.to_path_buf(),
+            metadata: directory_metadata,
+            file_entries,
+        });
     }
 
     for child in children {

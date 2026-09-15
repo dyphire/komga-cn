@@ -60,11 +60,11 @@ const SERIES_DEPENDENCY_SQL: &[&str] = &[
     "DELETE FROM BOOK_METADATA_AGGREGATION WHERE SERIES_ID = ?",
 ];
 
-pub async fn delete_book_dependency_rows(pool: &SqlitePool, book_id: &str) -> anyhow::Result<()> {
+pub async fn delete_book_dependency_rows(tx: &mut Transaction<'_, Sqlite>, book_id: &str) -> anyhow::Result<()> {
     for sql in BOOK_DEPENDENCY_SQL {
         sqlx::query(*sql)
             .bind(book_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .with_context(|| format!("delete book dependency rows for '{book_id}'"))?;
     }
@@ -72,13 +72,13 @@ pub async fn delete_book_dependency_rows(pool: &SqlitePool, book_id: &str) -> an
 }
 
 pub async fn delete_series_dependency_rows(
-    pool: &SqlitePool,
+    tx: &mut Transaction<'_, Sqlite>,
     series_id: &str,
 ) -> anyhow::Result<()> {
     for sql in SERIES_DEPENDENCY_SQL {
         sqlx::query(*sql)
             .bind(series_id)
-            .execute(pool)
+            .execute(&mut **tx)
             .await
             .with_context(|| format!("delete series dependency rows for '{series_id}'"))?;
     }

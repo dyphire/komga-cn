@@ -245,6 +245,46 @@ mod tests {
             .await
             .expect("library row should be inserted");
 
+        sqlx::query(
+            r#"INSERT INTO SERIES (ID, FILE_LAST_MODIFIED, NAME, URL, LIBRARY_ID, oneshot)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, 0)"#,
+        )
+        .bind("series-1")
+        .bind(1_i64)
+        .bind("Series One")
+        .bind("Series One")
+        .bind("library-1")
+        .execute(&pool)
+        .await
+        .expect("series row should be inserted");
+
+        sqlx::query(
+            r#"INSERT INTO BOOK (ID, FILE_LAST_MODIFIED, NAME, URL, SERIES_ID, FILE_SIZE, NUMBER, LIBRARY_ID, oneshot, FILE_HASH)
+VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, 0, ?)"#,
+        )
+        .bind("book-1")
+        .bind(1_i64)
+        .bind("Book One")
+        .bind("Series One/book.cbz")
+        .bind("series-1")
+        .bind(10_i64)
+        .bind(1_i64)
+        .bind("library-1")
+        .bind("hashed")
+        .execute(&pool)
+        .await
+        .expect("book row should be inserted");
+
+        sqlx::query(
+            "INSERT INTO MEDIA (BOOK_ID, MEDIA_TYPE, STATUS) VALUES (?, ?, ?)",
+        )
+        .bind("book-1")
+        .bind("application/octet-stream")
+        .bind("UNKNOWN")
+        .execute(&pool)
+        .await
+        .expect("media row should be inserted");
+
         let scan_result = LibraryScanResult {
             book_ids: vec!["book-1".to_string()],
             series_rows: vec![ScannedSeriesRow {

@@ -6,6 +6,7 @@ use komga_application::discovery::{
     DiscoveryFacetService, LibraryIdMappingPort, PersistedBookIdResolverPort,
     PersistedSeriesIdResolverPort, PersistedSetService, SeriesDetailPort, SeriesMetadataWritePort,
 };
+use komga_application::media_assets::ThumbnailWriterPort;
 use komga_application::runtime_sse::RuntimeSseEventSource;
 
 use super::app_state::HttpAppState;
@@ -28,6 +29,7 @@ pub struct DiscoveryState {
     pub(crate) series_id_resolver: Arc<dyn PersistedSeriesIdResolverPort>,
     pub(crate) discovery_browse: Arc<dyn DiscoveryBrowseService>,
     pub(crate) discovery_facets: Arc<dyn DiscoveryFacetService>,
+    pub(crate) thumbnails: Arc<dyn ThumbnailWriterPort>,
 }
 
 impl FromRef<Arc<HttpAppState>> for DiscoveryState {
@@ -47,6 +49,7 @@ impl FromRef<Arc<HttpAppState>> for DiscoveryState {
             series_id_resolver: app.services.series_id_resolver.clone(),
             discovery_browse: app.services.discovery_browse.clone(),
             discovery_facets: app.services.discovery_facets.clone(),
+            thumbnails: app.services.thumbnail_writer.clone(),
         }
     }
 }

@@ -8,7 +8,7 @@ use sqlx::{Row, SqlitePool};
 use komga_infrastructure_base::stored_paths::resolve_stored_path;
 
 use super::scan_discovery::{
-    build_sidecars, collect_series_directories, is_hidden_path, is_supported_book_file,
+    build_sidecars, collect_series_directories, is_supported_book_file,
     metadata_updated_unix_seconds, path_file_name_utf8, path_file_stem_utf8,
     resolve_oneshot_series_id, route_safe_scanner_id, scanner_url_key,
 };
@@ -84,54 +84,20 @@ pub(super) fn build_scanned_library(
     let mut discovered_series_ids = HashSet::new();
     let mut discovered_book_ids = HashSet::new();
 
-    for series_dir in discovered {
-        let series_url = series_dir.to_string_lossy().to_string();
-        let regular_series_id = route_safe_scanner_id("series", series_dir.as_path());
+    for directory in discovered {
+        let series_url = directory.path.to_string_lossy().to_string();
+        let regular_series_id = route_safe_scanner_id("series", directory.path.as_path());
         let series_is_oneshot = oneshots_directory
             .as_ref()
             .is_some_and(|value| series_url.to_ascii_lowercase().contains(value));
-        let series_dir_metadata = fs::metadata(&series_dir).map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to read series directory metadata for '{}': ",
-                series_dir.display()
-            ))
-        })?;
         let series_dir_last_modified_unix_seconds =
-            metadata_updated_unix_seconds(&series_dir_metadata, series_dir.as_path())?;
-
-        let entries = fs::read_dir(&series_dir).map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to scan series directory '{}': ",
-                series_dir.display()
-            ))
-        })?;
+            metadata_updated_unix_seconds(&directory.metadata, directory.path.as_path())?;
 
         let mut books = Vec::new();
         let mut changed_book_candidates = Vec::new();
         let mut sidecar_candidates = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to read directory entry in '{}': ",
-                    series_dir.display()
-                ))
-            })?;
-            let path = entry.path();
-
-            if is_hidden_path(path.as_path()) {
-                continue;
-            }
-
-            let metadata = entry.metadata().map_err(|error| {
-                anyhow::anyhow!(error).context(format!(
-                    "failed to read metadata for '{}': ",
-                    path.display()
-                ))
-            })?;
-
-            if !metadata.is_file() {
-                continue;
-            }
+        for file_entry in directory.file_entries {
+            let path = file_entry.path;
 
             if is_supported_book_file(path.as_path(), &scan_config) {
                 let book_url = path.to_string_lossy().to_string();
@@ -141,7 +107,7 @@ pub(super) fn build_scanned_library(
                     .map(|existing| existing.book_id.clone())
                     .unwrap_or_else(|| route_safe_scanner_id("book", path.as_path()));
                 let file_last_modified_unix_seconds =
-                    metadata_updated_unix_seconds(&metadata, path.as_path())?;
+                    metadata_updated_unix_seconds(&file_entry.metadata, path.as_path())?;
                 let book_name = path_file_stem_utf8(path.as_path())?.to_string();
 
                 if let Some(existing) = existing_books_by_url.get(&book_url_key)
@@ -163,7 +129,7 @@ pub(super) fn build_scanned_library(
                     book_id: book_id.clone(),
                     book_name,
                     book_url,
-                    file_size: metadata.len() as i64,
+                    file_size: file_entry.metadata.len() as i64,
                     file_last_modified_unix_seconds,
                     oneshot: false,
                 });
@@ -171,7 +137,7 @@ pub(super) fn build_scanned_library(
                 continue;
             }
 
-            sidecar_candidates.push((path, metadata));
+            sidecar_candidates.push((path, file_entry.metadata));
         }
 
         if books.is_empty() {
@@ -245,7 +211,7 @@ pub(super) fn build_scanned_library(
             changed_existing_book_ids.extend(changed_book_candidates);
         }
         discovered_series_ids.insert(series_id.clone());
-        let series_name = path_file_name_utf8(series_dir.as_path())?.to_string();
+        let series_name = path_file_name_utf8(directory.path.as_path())?.to_string();
 
         sidecars.extend(build_sidecars(
             &series_url,

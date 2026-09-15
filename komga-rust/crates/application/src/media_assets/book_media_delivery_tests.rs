@@ -402,6 +402,7 @@ async fn book_page_renders_pdf_using_requested_image_format() {
             file_name: Some("book.pdf-1.avif".to_string()),
             source_file: Some(PathBuf::from("/library/book.pdf")),
             disposition: BookMediaDeliveryDisposition::Inline,
+            etag_key: Some("1:image/avif".to_string()),
         })
     );
 }
@@ -477,6 +478,7 @@ async fn book_page_uses_archive_page_when_persisted_page_row_is_missing() {
             file_name: Some("book.cbz-1.png".to_string()),
             source_file: Some(PathBuf::from("/library/book.cbz")),
             disposition: BookMediaDeliveryDisposition::Inline,
+            etag_key: Some("1:image/png".to_string()),
         })
     );
 }
