@@ -1,8 +1,11 @@
 use anyhow::Context;
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
 use sqlx::SqlitePool;
+use tokio::sync::Mutex as TokioMutex;
 
 use super::documents;
 use super::lifecycle::{
@@ -14,7 +17,7 @@ use super::lifecycle::{
 #[path = "engine_tests.rs"]
 mod tests;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SearchIndexEngine {
     pool: SqlitePool,
     index_dir: PathBuf,
@@ -25,6 +28,22 @@ pub struct SearchIndexEngine {
 enum SearchEventAttempt {
     Applied,
     RebuildRequired,
+}
+
+/// Process-wide serialization of search-index write mutations.
+///
+/// Every write path currently bootstraps a fresh `IndexWriter` (which acquires the
+/// tantivy directory write lock), applies the mutation, then shuts the writer down.
+/// Concurrent mutations from parallel HTTP requests (e.g. bulk book-metadata PATCH)
+/// therefore collide on the directory lock and fail with `LockBusy`. Serializing the
+/// whole bootstrap-mutate-shutdown sequence at the process level.
+static SEARCH_INDEX_WRITE_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
+async fn acquire_search_index_write_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    SEARCH_INDEX_WRITE_LOCK
+        .get_or_init(|| TokioMutex::new(()))
+        .lock()
+        .await
 }
 
 struct SearchIndexMutationRunner<'a> {
@@ -49,15 +68,58 @@ impl SearchIndexEngine {
         self.index_dir.as_path()
     }
 
+    /// Process-wide query-reader cache keyed by index directory.
+    ///
+    /// Query engines (read-only instances owned by the browse/opds surfaces) and write engines
+    /// (upsert/delete/rebuild instances) are distinct `SearchIndexEngine` objects, so a
+    /// per-instance cache would never be invalidated by writes issued through another instance.
+    /// Keeping the cached reader process-wide (keyed by index dir) lets any write invalidate the
+    /// reader for every engine sharing the same index. `Weak` references let entries die with the
+    /// last engine; distinct index dirs (one per library/fixture) are isolated.
+    fn query_state_registry(
+    ) -> &'static StdMutex<HashMap<PathBuf, Weak<SearchQueryLifecycle>>> {
+        static REGISTRY: OnceLock<StdMutex<HashMap<PathBuf, Weak<SearchQueryLifecycle>>>> =
+            OnceLock::new();
+        REGISTRY.get_or_init(|| StdMutex::new(HashMap::new()))
+    }
+
+    fn shared_query_state(&self) -> anyhow::Result<Arc<SearchQueryLifecycle>> {
+        let index_dir = self.index_dir();
+
+        {
+            let registry = Self::query_state_registry()
+                .lock()
+                .expect("search query state registry lock should not be poisoned");
+            if let Some(state) = registry.get(index_dir).and_then(Weak::upgrade) {
+                return Ok(state);
+            }
+        }
+
+        let state = Arc::new(
+            SearchQueryLifecycle::bootstrap(index_dir)
+                .context("failed to open search index for query")?,
+        );
+        Self::query_state_registry()
+            .lock()
+            .expect("search query state registry lock should not be poisoned")
+            .insert(index_dir.to_path_buf(), Arc::downgrade(&state));
+        Ok(state)
+    }
+
+    fn invalidate_query_state(&self) {
+        if let Ok(mut registry) = Self::query_state_registry().lock() {
+            registry.remove(self.index_dir());
+        }
+    }
+
     pub fn search_ids(
         &self,
         query: &str,
         entity_type: SearchEntityType,
         limit: usize,
     ) -> anyhow::Result<Vec<String>> {
-        let index = SearchQueryLifecycle::bootstrap(self.index_dir())
-            .context("failed to open search index for query")?;
-        index
+        let state = self.shared_query_state()?;
+        state
             .search_ids(query, entity_type, limit)
             .context("failed to execute search query")
     }
@@ -68,9 +130,8 @@ impl SearchIndexEngine {
         entity_type: SearchEntityType,
         limit: usize,
     ) -> anyhow::Result<Vec<SearchScoredHit>> {
-        let index = SearchQueryLifecycle::bootstrap(self.index_dir())
-            .context("failed to open search index for query")?;
-        index
+        let state = self.shared_query_state()?;
+        state
             .search_scored_ids(query, entity_type, limit)
             .context("failed to execute scored search query")
     }
@@ -126,7 +187,9 @@ impl SearchIndexEngine {
             self.index_dir.as_path(),
             series_id,
         )
-        .await
+        .await?;
+        self.invalidate_query_state();
+        Ok(())
     }
 
     pub async fn rebuild_all(&self) -> anyhow::Result<()> {
@@ -134,7 +197,10 @@ impl SearchIndexEngine {
             return Ok(());
         }
 
-        recover_search_index(&self.pool, self.index_dir.as_path()).await
+        let _guard = acquire_search_index_write_lock().await;
+        let result = recover_search_index(&self.pool, self.index_dir.as_path()).await;
+        self.invalidate_query_state();
+        result
     }
 
     pub async fn rebuild_entities(&self, entity_types: &[SearchEntityType]) -> anyhow::Result<()> {
@@ -142,7 +208,10 @@ impl SearchIndexEngine {
             return Ok(());
         }
 
-        rebuild_search_index_for_entities(&self.pool, self.index_dir.as_path(), entity_types).await
+        rebuild_search_index_for_entities(&self.pool, self.index_dir.as_path(), entity_types)
+            .await?;
+        self.invalidate_query_state();
+        Ok(())
     }
 
     async fn upsert_entity(
@@ -154,13 +223,17 @@ impl SearchIndexEngine {
             return Ok(false);
         }
 
-        sync_entity_upsert_from_database(
+        let written = sync_entity_upsert_from_database(
             &self.pool,
             self.index_dir.as_path(),
             entity_type,
             entity_id,
         )
-        .await
+        .await?;
+        if written {
+            self.invalidate_query_state();
+        }
+        Ok(written)
     }
 
     async fn delete_entity(
@@ -173,7 +246,19 @@ impl SearchIndexEngine {
         }
 
         sync_entity_delete_from_index(&self.pool, self.index_dir.as_path(), entity_type, entity_id)
-            .await
+            .await?;
+        self.invalidate_query_state();
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for SearchIndexEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SearchIndexEngine")
+            .field("pool", &self.pool)
+            .field("index_dir", &self.index_dir)
+            .field("owns_search_index", &self.owns_search_index)
+            .finish()
     }
 }
 
@@ -260,6 +345,7 @@ async fn rebuild_search_index_for_entities(
     index_dir: &Path,
     entity_types: &[SearchEntityType],
 ) -> anyhow::Result<()> {
+    let _guard = acquire_search_index_write_lock().await;
     SearchIndexMutationRunner::new(pool, index_dir)
         .run(|| try_rebuild_search_index_for_entities(pool, index_dir, entity_types))
         .await
@@ -293,6 +379,7 @@ async fn apply_search_event(
     index_dir: &Path,
     event: SearchEvent,
 ) -> anyhow::Result<()> {
+    let _guard = acquire_search_index_write_lock().await;
     SearchIndexMutationRunner::new(pool, index_dir)
         .run(|| try_apply_search_event(index_dir, event.clone()))
         .await

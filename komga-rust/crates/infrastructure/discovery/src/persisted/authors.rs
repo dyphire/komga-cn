@@ -1,5 +1,4 @@
 use anyhow::Context;
-use std::collections::BTreeSet;
 
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
@@ -104,7 +103,7 @@ pub(super) async fn load_persisted_authors_by_scope(
     authorized_library_ids: Option<&[String]>,
 ) -> anyhow::Result<Vec<AuthorEntry>> {
     let mut query = QueryBuilder::<Sqlite>::new(
-        r#"SELECT a.NAME, a.ROLE
+        r#"SELECT DISTINCT a.NAME, a.ROLE
          FROM BOOK_METADATA_AUTHOR a
          JOIN BOOK b ON b.ID = a.BOOK_ID"#,
     );
@@ -194,13 +193,11 @@ pub(super) async fn load_persisted_authors_by_scope(
         .context("query persisted v2 authors")?;
 
     let mut authors = Vec::with_capacity(rows.len());
-    let mut seen = BTreeSet::new();
     for row in rows {
-        let name = row.get::<String, _>("NAME");
-        let role = row.get::<String, _>("ROLE");
-        if seen.insert((name.clone(), role.clone())) {
-            authors.push(AuthorEntry { name, role });
-        }
+        authors.push(AuthorEntry {
+            name: row.get::<String, _>("NAME"),
+            role: row.get::<String, _>("ROLE"),
+        });
     }
 
     let collator = komga_domain::discovery::system_locale_collator();

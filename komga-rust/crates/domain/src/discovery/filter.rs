@@ -86,6 +86,12 @@ pub enum ReadStatus {
     Unread,
 }
 
+impl Default for ReadStatus {
+    fn default() -> Self {
+        Self::Unread
+    }
+}
+
 impl ReadStatus {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -162,6 +168,12 @@ pub enum MediaStatus {
     Outdated,
 }
 
+impl Default for MediaStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 impl MediaStatus {
     const VALUES: [Self; 5] = [
         Self::Ready,
@@ -211,6 +223,12 @@ pub enum SeriesStatus {
     Ongoing,
     Abandoned,
     Hiatus,
+}
+
+impl Default for SeriesStatus {
+    fn default() -> Self {
+        Self::Ongoing
+    }
 }
 
 impl SeriesStatus {

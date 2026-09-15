@@ -1,5 +1,5 @@
 use anyhow::Context;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::set_persistence;
 
@@ -31,6 +31,49 @@ ORDER BY NAME COLLATE NOCASE ASC"#,
             last_modified_date: row.get::<String, _>("LAST_MODIFIED_DATE"),
         })
         .collect())
+}
+
+pub(crate) async fn load_persisted_readlist_book_rows_for_ids(
+    pool: &SqlitePool,
+    readlist_ids: &[String],
+) -> anyhow::Result<Vec<(String, DiscoveryPersistedReadlistBookRecord)>> {
+    if readlist_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut rows = Vec::new();
+    for chunk in readlist_ids.chunks(500) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            r#"SELECT rb.READLIST_ID, rb.BOOK_ID, b.LIBRARY_ID
+FROM READLIST_BOOK rb
+JOIN BOOK b ON b.ID = rb.BOOK_ID
+WHERE rb.READLIST_ID IN ("#,
+        );
+        let mut separated = query.separated(",");
+        for id in chunk {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        query.push(" ORDER BY rb.READLIST_ID, rb.NUMBER ASC");
+
+        let chunk_rows = query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query persisted readlist book rows for ids")?;
+
+        rows.extend(chunk_rows.into_iter().map(|row| {
+            (
+                row.get::<String, _>("READLIST_ID"),
+                DiscoveryPersistedReadlistBookRecord {
+                    book_id: row.get::<String, _>("BOOK_ID"),
+                    library_id: row.get::<String, _>("LIBRARY_ID"),
+                },
+            )
+        }));
+    }
+
+    Ok(rows)
 }
 
 pub(crate) async fn load_persisted_readlist_detail(

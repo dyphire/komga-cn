@@ -1,5 +1,5 @@
 use anyhow::Context;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use komga_domain::discovery::MediaStatus;
@@ -7,6 +7,10 @@ use komga_domain::media_assets::ThumbnailType;
 use sqlx::{Row, SqlitePool};
 
 use komga_infrastructure_base::resolve_library_item_path;
+
+/// Chunk size for batched `MEDIA` lookups (keeps a single IN clause from
+/// growing unboundedly while staying far below the SQLite variable limit).
+const BOOK_MEDIA_STATUS_BATCH_SIZE: usize = 500;
 use komga_infrastructure_media_core::expected_extension_for_media_type;
 
 #[derive(Clone, Debug)]
@@ -427,33 +431,46 @@ pub(crate) async fn load_books_requiring_analysis(
 
     let mut result = Vec::new();
 
-    for book_id in book_ids {
-        let status = sqlx::query(
-            r#"
-            SELECT STATUS
-            FROM MEDIA
-            WHERE BOOK_ID = ?
-            LIMIT 1
-            "#,
-        )
-        .bind(book_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!("failed to query media status for '{book_id}'"))
-        })?
-        .map(|row| row.get::<String, _>("STATUS"));
+    // Batch the per-book MEDIA status lookup into a single IN query per chunk
+    // instead of one round trip per book (avoids N+1 on the scan follow-up path).
+    for chunk in book_ids.chunks(BOOK_MEDIA_STATUS_BATCH_SIZE) {
+        let mut query_builder =
+            sqlx::QueryBuilder::new("SELECT BOOK_ID, STATUS FROM MEDIA WHERE BOOK_ID IN (");
+        let mut separated = query_builder.separated(", ");
+        for book_id in chunk {
+            separated.push_bind(book_id);
+        }
+        separated.push_unseparated(")");
 
-        let needs_analysis = match status.as_deref() {
-            None => true,
-            Some(status) => matches!(
-                MediaStatus::parse(status),
-                Some(MediaStatus::Unknown | MediaStatus::Outdated)
-            ),
-        };
+        let rows = query_builder
+            .build()
+            .fetch_all(pool)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(error).context("failed to query media statuses for analysis")
+            })?;
 
-        if needs_analysis {
-            result.push(book_id.clone());
+        let mut media_book_ids = HashSet::with_capacity(chunk.len());
+        for row in rows {
+            let book_id = row.get::<String, _>("BOOK_ID");
+            media_book_ids.insert(book_id.clone());
+            let status = row.try_get::<Option<String>, _>("STATUS").unwrap_or(None);
+            let needs_analysis = match status.as_deref() {
+                None => true,
+                Some(status) => matches!(
+                    MediaStatus::parse(status),
+                    Some(MediaStatus::Unknown | MediaStatus::Outdated)
+                ),
+            };
+            if needs_analysis {
+                result.push(book_id);
+            }
+        }
+
+        for book_id in chunk {
+            if !media_book_ids.contains(book_id) {
+                result.push(book_id.clone());
+            }
         }
     }
 

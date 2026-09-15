@@ -1,5 +1,5 @@
 use anyhow::Context;
-use sqlx::{Row, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 use crate::set_persistence;
 
@@ -77,6 +77,45 @@ ORDER BY NUMBER ASC"#,
         .into_iter()
         .map(|row| row.get::<String, _>("SERIES_ID"))
         .collect())
+}
+
+pub(crate) async fn load_persisted_collection_series_ids_for_ids(
+    pool: &SqlitePool,
+    collection_ids: &[String],
+) -> anyhow::Result<Vec<(String, String)>> {
+    if collection_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut rows = Vec::new();
+    for chunk in collection_ids.chunks(500) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            r#"SELECT COLLECTION_ID, SERIES_ID
+FROM COLLECTION_SERIES
+WHERE COLLECTION_ID IN ("#,
+        );
+        let mut separated = query.separated(",");
+        for id in chunk {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+        query.push(" ORDER BY COLLECTION_ID, NUMBER ASC");
+
+        let chunk_rows = query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query persisted collection series ids for ids")?;
+
+        rows.extend(chunk_rows.into_iter().map(|row| {
+            (
+                row.get::<String, _>("COLLECTION_ID"),
+                row.get::<String, _>("SERIES_ID"),
+            )
+        }));
+    }
+
+    Ok(rows)
 }
 
 pub(crate) async fn load_series_library_id(
@@ -231,4 +270,103 @@ pub(crate) async fn delete_persisted_collection(
         "collection",
     )
     .await
+}
+
+pub(crate) async fn load_series_library_ids_for_ids(
+    pool: &SqlitePool,
+    series_ids: &[String],
+) -> anyhow::Result<Vec<(String, String)>> {
+    if series_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut results = Vec::with_capacity(series_ids.len());
+    for chunk in series_ids.chunks(500) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT ID, LIBRARY_ID FROM SERIES WHERE ID IN (",
+        );
+        let mut separated = query.separated(", ");
+        for series_id in chunk {
+            separated.push_bind(series_id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query series library ids batch for visibility")?;
+        for row in rows {
+            results.push((
+                row.get::<String, _>("ID"),
+                row.get::<String, _>("LIBRARY_ID"),
+            ));
+        }
+    }
+    Ok(results)
+}
+
+pub(crate) async fn load_series_restrictions_for_ids(
+    pool: &SqlitePool,
+    series_ids: &[String],
+) -> anyhow::Result<Vec<(String, PersistedSeriesRestrictionRecord)>> {
+    if series_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut age_ratings: std::collections::HashMap<String, Option<u32>> =
+        std::collections::HashMap::new();
+    let mut labels_by_series: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for chunk in series_ids.chunks(500) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT SERIES_ID, AGE_RATING FROM SERIES_METADATA WHERE SERIES_ID IN (",
+        );
+        let mut separated = query.separated(", ");
+        for series_id in chunk {
+            separated.push_bind(series_id);
+        }
+        separated.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query series age ratings batch for visibility")?;
+        for row in rows {
+            age_ratings.insert(
+                row.get::<String, _>("SERIES_ID"),
+                row.get::<Option<i64>, _>("AGE_RATING")
+                    .map(set_persistence::clamp_kotlin_int_u32),
+            );
+        }
+
+        let mut label_query = QueryBuilder::<Sqlite>::new(
+            "SELECT SERIES_ID, LABEL FROM SERIES_METADATA_SHARING WHERE SERIES_ID IN (",
+        );
+        let mut separated = label_query.separated(", ");
+        for series_id in chunk {
+            separated.push_bind(series_id);
+        }
+        separated.push_unseparated(")");
+        let label_rows = label_query
+            .build()
+            .fetch_all(pool)
+            .await
+            .context("query series sharing labels batch for visibility")?;
+        for row in label_rows {
+            labels_by_series
+                .entry(row.get::<String, _>("SERIES_ID"))
+                .or_default()
+                .push(row.get::<String, _>("LABEL"));
+        }
+    }
+
+    let mut results = Vec::with_capacity(series_ids.len());
+    for series_id in series_ids {
+        let age_rating = age_ratings.get(series_id).copied().flatten();
+        let labels = labels_by_series.remove(series_id).unwrap_or_default();
+        results.push((
+            series_id.clone(),
+            PersistedSeriesRestrictionRecord { age_rating, labels },
+        ));
+    }
+    Ok(results)
 }

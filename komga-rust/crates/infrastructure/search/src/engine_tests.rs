@@ -699,3 +699,73 @@ fn unique_nanos() -> u128 {
         .expect("system clock should be after unix epoch")
         .as_nanos()
 }
+
+#[tokio::test]
+async fn search_index_engine_shared_query_reader_sees_writes_and_rebuilds() {
+    let fixture = SearchIndexEngineFixture::new("engine-query-cache-consistency").await;
+    seed_series(&fixture.pool, "series-1", "Cache Series", false, "Cache Publisher").await;
+    seed_book(&fixture.pool, "book-1", "series-1", "Cache Book", false).await;
+
+    let engine = fixture.engine(true);
+    engine.rebuild_all().await.expect("index rebuild should complete");
+
+    // First query primes the cached reader.
+    assert_eq!(
+        engine
+            .search_ids("Cache Book", SearchEntityType::Book, 10)
+            .expect("prime query should execute"),
+        vec!["book-1".to_string()]
+    );
+
+    // Clones share the same cached reader and still see the same results.
+    let engine_clone = engine.clone();
+    assert_eq!(
+        engine_clone
+            .search_ids("Cache Book", SearchEntityType::Book, 10)
+            .expect("clone query should execute"),
+        vec!["book-1".to_string()]
+    );
+
+    // A write through the engine must invalidate the cached reader.
+    seed_book(&fixture.pool, "book-2", "series-1", "Cache Book Two", false).await;
+    assert!(
+        engine
+            .upsert_book("book-2")
+            .await
+            .expect("upsert should succeed")
+    );
+    assert_eq!(
+        engine
+            .search_ids("Cache Book Two", SearchEntityType::Book, 10)
+            .expect("post-upsert query should execute"),
+        vec!["book-2".to_string()]
+    );
+
+    // A delete must invalidate the cached reader as well.
+    engine
+        .delete_book("book-2")
+        .await
+        .expect("delete should succeed");
+    assert!(
+        engine
+            .search_ids("Cache Book Two", SearchEntityType::Book, 10)
+            .expect("post-delete query should execute")
+            .is_empty(),
+        "deleted book must no longer be visible through the cached reader"
+    );
+
+    // rebuild_all must invalidate the cached reader too.
+    seed_book(&fixture.pool, "book-3", "series-1", "Cache Book Three", false).await;
+    engine
+        .rebuild_all()
+        .await
+        .expect("rebuild should complete");
+    assert_eq!(
+        engine
+            .search_ids("Cache Book Three", SearchEntityType::Book, 10)
+            .expect("post-rebuild query should execute"),
+        vec!["book-3".to_string()]
+    );
+
+    fixture.cleanup().await;
+}

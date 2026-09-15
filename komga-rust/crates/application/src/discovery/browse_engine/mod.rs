@@ -120,6 +120,47 @@ pub fn book_condition_needs_posters(condition: &BookCondition) -> bool {
     }
 }
 
+/// Evaluate a book condition against a row, reusing the in-memory engine semantics.
+pub fn evaluate_book_condition(
+    row: &BookRow,
+    condition: &BookCondition,
+    ctx: &BookEvaluationContext,
+) -> bool {
+    book_condition::evaluate(row, condition, ctx)
+}
+
+/// Whether a book value condition can be satisfied from lightweight sort rows
+/// (no aggregated metadata fields: tags/genres/authors/read-status/posters).
+pub fn book_value_condition_is_lightweight(value: &BookValueCondition) -> bool {
+    matches!(
+        value,
+        BookValueCondition::LibraryId(_)
+            | BookValueCondition::SeriesId(_)
+            | BookValueCondition::Title(_)
+            | BookValueCondition::Deleted(_)
+            | BookValueCondition::OneShot(_)
+            | BookValueCondition::Language(_)
+            | BookValueCondition::Publisher(_)
+            | BookValueCondition::AgeRating(_)
+            | BookValueCondition::MediaProfile(_)
+            | BookValueCondition::MediaStatus(_)
+            | BookValueCondition::NumberSort(_)
+            | BookValueCondition::ReleaseDate(_)
+    )
+}
+
+/// Whether a whole book condition (including composites) only uses lightweight
+/// value conditions.
+pub fn book_condition_is_lightweight(condition: &BookCondition) -> bool {
+    match condition {
+        BookCondition::Value(value) => book_value_condition_is_lightweight(value),
+        BookCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .all(book_condition_is_lightweight),
+    }
+}
+
 pub fn collect_book_release_date_offsets(condition: &BookCondition) -> BTreeSet<i64> {
     let mut offsets = BTreeSet::new();
     collect_book_offsets_recursive(condition, &mut offsets);
@@ -140,6 +181,47 @@ fn collect_book_offsets_recursive(condition: &BookCondition, offsets: &mut BTree
             }
         }
         _ => {}
+    }
+}
+
+/// Evaluate a series condition against a row, reusing the in-memory engine semantics.
+pub fn evaluate_series_condition(
+    row: &SeriesRow,
+    condition: &SeriesCondition,
+    ctx: &SeriesEvaluationContext,
+) -> bool {
+    series_condition::evaluate(row, condition, ctx)
+}
+
+/// Whether a series value condition can be satisfied from lightweight sort rows
+/// (no aggregated state: collections, read progress, genres/tags, sharing
+/// labels, book author aggregation, total book counts).
+pub fn series_value_condition_is_lightweight(value: &SeriesValueCondition) -> bool {
+    matches!(
+        value,
+        SeriesValueCondition::LibraryId(_)
+            | SeriesValueCondition::Title(_)
+            | SeriesValueCondition::TitleSort(_)
+            | SeriesValueCondition::Deleted(_)
+            | SeriesValueCondition::OneShot(_)
+            | SeriesValueCondition::Language(_)
+            | SeriesValueCondition::Publisher(_)
+            | SeriesValueCondition::AgeRating(_)
+            | SeriesValueCondition::ReleaseDate(_)
+            | SeriesValueCondition::SeriesStatus(_)
+            | SeriesValueCondition::ExcludeNewlyAdded(_)
+    )
+}
+
+/// Whether a whole series condition (including composites) only uses
+/// lightweight value conditions.
+pub fn series_condition_is_lightweight(condition: &SeriesCondition) -> bool {
+    match condition {
+        SeriesCondition::Value(value) => series_value_condition_is_lightweight(value),
+        SeriesCondition::Composite(composite) => composite
+            .conditions
+            .iter()
+            .all(series_condition_is_lightweight),
     }
 }
 

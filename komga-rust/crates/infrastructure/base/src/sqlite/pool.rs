@@ -4,7 +4,10 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::SqlitePool;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use komga_domain::discovery::compare_book_names;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 
 use crate::file_io::remove_file_after_release;
 use crate::sqlite::schema;
@@ -260,6 +263,9 @@ pub fn file_backed_connect_options(path: impl AsRef<Path>) -> SqliteConnectOptio
         .filename(path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .collation("icu_names", compare_book_names)
+        .with_regexp()
 }
 
 /// Sizing heuristic for read-heavy pools: `max(4, NumCPU)`.

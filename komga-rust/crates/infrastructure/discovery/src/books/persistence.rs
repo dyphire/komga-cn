@@ -93,7 +93,31 @@ async fn fetch_persisted_book_summary_rows(
 
 fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
     if include_read_progress {
-        r#"SELECT b.ID,
+        r#"WITH series_genres AS (
+    SELECT smg.SERIES_ID AS ID,
+           GROUP_CONCAT(smg.GENRE, char(30) ORDER BY smg.rowid) AS VALUE
+    FROM SERIES_METADATA_GENRE smg
+    GROUP BY smg.SERIES_ID
+),
+book_authors AS (
+    SELECT ba.BOOK_ID AS ID,
+           GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F' ORDER BY ba.rowid) AS VALUE
+    FROM BOOK_METADATA_AUTHOR ba
+    GROUP BY ba.BOOK_ID
+),
+book_tags AS (
+    SELECT bt.BOOK_ID AS ID,
+           GROUP_CONCAT(bt.TAG, char(30) ORDER BY bt.rowid) AS VALUE
+    FROM BOOK_METADATA_TAG bt
+    GROUP BY bt.BOOK_ID
+),
+book_links AS (
+    SELECT bl.BOOK_ID AS ID,
+           GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F' ORDER BY bl.rowid) AS VALUE
+    FROM BOOK_METADATA_LINK bl
+    GROUP BY bl.BOOK_ID
+)
+SELECT b.ID,
                   b.SERIES_ID,
                   b.LIBRARY_ID,
                   COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -112,11 +136,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.LANGUAGE AS LANGUAGE,
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
-                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT smg.GENRE AS GENRE
-                                  FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID
-                                  ORDER BY smg.rowid)), '') AS GENRES,
+                  COALESCE(sg.VALUE, '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -132,19 +152,13 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK,
                   bm.RELEASE_DATE AS METADATA_RELEASE_DATE,
                   COALESCE(bm.RELEASE_DATE_LOCK, 0) AS METADATA_RELEASE_DATE_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F')
-                            FROM BOOK_METADATA_AUTHOR ba
-                            WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
+                  COALESCE(bau.VALUE, '') AS METADATA_AUTHORS,
                   COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bt.TAG, char(30))
-                            FROM BOOK_METADATA_TAG bt
-                            WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
+                  COALESCE(btg.VALUE, '') AS METADATA_TAGS,
                   COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
                   COALESCE(bm.ISBN, '') AS METADATA_ISBN,
                   COALESCE(bm.ISBN_LOCK, 0) AS METADATA_ISBN_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F')
-                            FROM BOOK_METADATA_LINK bl
-                            WHERE bl.BOOK_ID = b.ID), '') AS METADATA_LINKS,
+                  COALESCE(bli.VALUE, '') AS METADATA_LINKS,
                   COALESCE(bm.LINKS_LOCK, 0) AS METADATA_LINKS_LOCK,
                   COALESCE(bm.CREATED_DATE, b.CREATED_DATE) AS METADATA_CREATED,
                   COALESCE(bm.LAST_MODIFIED_DATE, b.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
@@ -165,10 +179,38 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+           LEFT JOIN series_genres sg ON sg.ID = s.ID
+           LEFT JOIN book_authors bau ON bau.ID = b.ID
+           LEFT JOIN book_tags btg ON btg.ID = b.ID
+           LEFT JOIN book_links bli ON bli.ID = b.ID
             LEFT JOIN READ_PROGRESS rp ON rp.BOOK_ID = b.ID
                                    AND rp.USER_ID = "#
     } else {
-        r#"SELECT b.ID,
+        r#"WITH series_genres AS (
+    SELECT smg.SERIES_ID AS ID,
+           GROUP_CONCAT(smg.GENRE, char(30) ORDER BY smg.rowid) AS VALUE
+    FROM SERIES_METADATA_GENRE smg
+    GROUP BY smg.SERIES_ID
+),
+book_authors AS (
+    SELECT ba.BOOK_ID AS ID,
+           GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F' ORDER BY ba.rowid) AS VALUE
+    FROM BOOK_METADATA_AUTHOR ba
+    GROUP BY ba.BOOK_ID
+),
+book_tags AS (
+    SELECT bt.BOOK_ID AS ID,
+           GROUP_CONCAT(bt.TAG, char(30) ORDER BY bt.rowid) AS VALUE
+    FROM BOOK_METADATA_TAG bt
+    GROUP BY bt.BOOK_ID
+),
+book_links AS (
+    SELECT bl.BOOK_ID AS ID,
+           GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F' ORDER BY bl.rowid) AS VALUE
+    FROM BOOK_METADATA_LINK bl
+    GROUP BY bl.BOOK_ID
+)
+SELECT b.ID,
                   b.SERIES_ID,
                   b.LIBRARY_ID,
                   COALESCE(sm.TITLE, s.NAME) AS SERIES_TITLE,
@@ -187,11 +229,7 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   sm.LANGUAGE AS LANGUAGE,
                   sm.PUBLISHER AS PUBLISHER,
                   sm.AGE_RATING AS AGE_RATING,
-                  COALESCE((SELECT GROUP_CONCAT(GENRE, char(30))
-                            FROM (SELECT smg.GENRE AS GENRE
-                                  FROM SERIES_METADATA_GENRE smg
-                                  WHERE smg.SERIES_ID = s.ID
-                                  ORDER BY smg.rowid)), '') AS GENRES,
+                  COALESCE(sg.VALUE, '') AS GENRES,
                   COALESCE(m.STATUS, 'UNKNOWN') AS MEDIA_STATUS,
                   COALESCE(m.MEDIA_TYPE, '') AS MEDIA_TYPE,
                   COALESCE(m.PAGE_COUNT, 0) AS PAGE_COUNT,
@@ -207,19 +245,13 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
                   COALESCE(bm.NUMBER_SORT_LOCK, 0) AS METADATA_NUMBER_SORT_LOCK,
                   bm.RELEASE_DATE AS METADATA_RELEASE_DATE,
                   COALESCE(bm.RELEASE_DATE_LOCK, 0) AS METADATA_RELEASE_DATE_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(ba.NAME || X'1E' || COALESCE(ba.ROLE, ''), X'1F')
-                            FROM BOOK_METADATA_AUTHOR ba
-                            WHERE ba.BOOK_ID = b.ID), '') AS METADATA_AUTHORS,
+                  COALESCE(bau.VALUE, '') AS METADATA_AUTHORS,
                   COALESCE(bm.AUTHORS_LOCK, 0) AS METADATA_AUTHORS_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bt.TAG, char(30))
-                            FROM BOOK_METADATA_TAG bt
-                            WHERE bt.BOOK_ID = b.ID), '') AS METADATA_TAGS,
+                  COALESCE(btg.VALUE, '') AS METADATA_TAGS,
                   COALESCE(bm.TAGS_LOCK, 0) AS METADATA_TAGS_LOCK,
                   COALESCE(bm.ISBN, '') AS METADATA_ISBN,
                   COALESCE(bm.ISBN_LOCK, 0) AS METADATA_ISBN_LOCK,
-                  COALESCE((SELECT GROUP_CONCAT(bl.LABEL || X'1E' || bl.URL, X'1F')
-                            FROM BOOK_METADATA_LINK bl
-                            WHERE bl.BOOK_ID = b.ID), '') AS METADATA_LINKS,
+                  COALESCE(bli.VALUE, '') AS METADATA_LINKS,
                   COALESCE(bm.LINKS_LOCK, 0) AS METADATA_LINKS_LOCK,
                   COALESCE(bm.CREATED_DATE, b.CREATED_DATE) AS METADATA_CREATED,
                   COALESCE(bm.LAST_MODIFIED_DATE, b.LAST_MODIFIED_DATE) AS METADATA_LAST_MODIFIED,
@@ -235,7 +267,11 @@ fn book_summary_select_sql(include_read_progress: bool) -> &'static str {
            JOIN SERIES s ON s.ID = b.SERIES_ID
            LEFT JOIN BOOK_METADATA bm ON bm.BOOK_ID = b.ID
            LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
-            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID"#
+            LEFT JOIN SERIES_METADATA sm ON sm.SERIES_ID = s.ID
+           LEFT JOIN series_genres sg ON sg.ID = s.ID
+           LEFT JOIN book_authors bau ON bau.ID = b.ID
+           LEFT JOIN book_tags btg ON btg.ID = b.ID
+           LEFT JOIN book_links bli ON bli.ID = b.ID"#
     }
 }
 

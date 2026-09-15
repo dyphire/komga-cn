@@ -2,18 +2,60 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::Multipart;
 use image::ImageFormat;
-use komga_application::media_assets::{EntityThumbnailBinary, ThumbnailType};
+use komga_application::media_assets::EntityThumbnailBinary;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::{Notify, Semaphore};
 
 use crate::helpers::spring_error_response;
 use crate::media_response_policy::MediaAssetResponse;
 use crate::state::MediaAssetsState;
 
-use super::super::media_helpers::book_media_is_epub;
-use super::super::page_resolution;
-use super::super::types::PersistedBookMedia;
-
 const MOSAIC_HEIGHT: u32 = 300;
 const MOSAIC_RATIO: f32 = 0.70666664;
+
+/// Pixel dimensions of the mosaic thumbnail as persisted in the DB.
+pub(super) fn mosaic_dimensions() -> (i64, i64) {
+    let height = MOSAIC_HEIGHT;
+    let width = ((height as f32) * MOSAIC_RATIO).round() as u32;
+    (i64::from(width), i64::from(height))
+}
+
+/// In-flight deduplication for mosaic generation, keyed by entity id
+/// (e.g. `"readlist-<id>"` / `"collection-<id>"`). When several requests race
+/// for the same missing thumbnail, only the first performs the (expensive)
+/// generation; the others wait on the returned Notify and then re-read the
+/// persisted thumbnail.
+static GENERATED_THUMBNAIL_INFLIGHT: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> =
+    OnceLock::new();
+
+/// Returns `(true, None)` when the caller should generate, or `(false, Some(notify))`
+/// when another request is already generating for `key`.
+pub(super) fn mosaic_inflight_start(key: &str) -> (bool, Option<Arc<Notify>>) {
+    let mut map = GENERATED_THUMBNAIL_INFLIGHT
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    if let Some(notify) = map.get(key) {
+        (false, Some(notify.clone()))
+    } else {
+        let notify = Arc::new(Notify::new());
+        map.insert(key.to_string(), notify.clone());
+        (true, None)
+    }
+}
+
+/// Clears the in-flight marker for `key` and wakes any waiters.
+pub(super) fn mosaic_inflight_finish(key: &str) {
+    if let Ok(mut map) = GENERATED_THUMBNAIL_INFLIGHT
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        if let Some(notify) = map.remove(key) {
+            notify.notify_waiters();
+        }
+    }
+}
 
 pub(super) struct ThumbnailUpload {
     pub(super) bytes: Vec<u8>,
@@ -109,12 +151,40 @@ pub(crate) fn response_from_thumbnail_bytes(
         .into_response(Some(headers))
 }
 
+fn is_jpeg_bytes(bytes: &[u8]) -> bool {
+    bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
+}
+
+/// Serves persisted thumbnails without re-encoding them: most thumbnails are
+/// already JPEG (analysis-time generated or mosaic), so decoding and re-encoding
+/// on every request wasted CPU and allocated large transient buffers, stalling
+/// the async workers under thumbnail-heavy scrolling. Non-JPEG bytes (e.g.
+/// user-uploaded PNG) still go through the conversion path.
 pub(crate) fn response_from_thumbnail_jpeg_bytes(headers: &HeaderMap, bytes: Vec<u8>) -> Response {
+    if is_jpeg_bytes(&bytes) {
+        return response_from_thumbnail_bytes(headers, bytes, "image/jpeg");
+    }
+
     let Some(jpeg_bytes) = encode_image_bytes_as_jpeg(&bytes) else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
     response_from_thumbnail_bytes(headers, jpeg_bytes, "image/jpeg")
+}
+
+/// Runs the CPU-heavy mosaic composition on a blocking thread and bounds the
+/// number of simultaneous compositions, so a burst of thumbnail requests cannot
+/// stall unrelated API calls or balloon memory with concurrent image decodes.
+async fn encode_mosaic_off_thread(images: Vec<Vec<u8>>) -> anyhow::Result<Option<Vec<u8>>> {
+    static MOSAIC_ENCODE_LIMIT: OnceLock<Semaphore> = OnceLock::new();
+    let semaphore = MOSAIC_ENCODE_LIMIT.get_or_init(|| Semaphore::new(2));
+    let _permit = semaphore
+        .acquire()
+        .await
+        .expect("mosaic encode semaphore should not be closed");
+    Ok(tokio::task::spawn_blocking(move || encode_mosaic_jpeg(&images))
+        .await
+        .map_err(|error| anyhow::anyhow!("mosaic encode task failed: {error}"))?)
 }
 
 pub(crate) fn response_from_thumbnail_small_jpeg_bytes(
@@ -136,37 +206,19 @@ pub(super) fn set_one_hour_private_cache_control(response: &mut Response) {
     );
 }
 
+/// Reads the persisted book thumbnail (analysis-time generated or user
+/// uploaded) straight from the DB. Aligns with the Kotlin implementation,
+/// which composes mosaics from persisted thumbnails and never touches the
+/// source book file: books without a persisted thumbnail are skipped.
 pub(super) async fn load_book_thumbnail_source_bytes(
     app: &MediaAssetsState,
     book_id: &str,
-    media: &PersistedBookMedia,
 ) -> anyhow::Result<Option<Vec<u8>>> {
-    match app
+    Ok(app
         .thumbnail_reader
         .selected_book_thumbnail(book_id)
         .await?
-    {
-        Some(thumbnail) if thumbnail.thumbnail_type != ThumbnailType::Generated => {
-            return Ok(Some(thumbnail.thumbnail));
-        }
-        Some(_) | None => {}
-    }
-
-    if book_media_is_epub(media) {
-        return app
-            .book_media_content
-            .epub_cover_bytes(media)
-            .await
-            .map(|cover| cover.map(|cover| cover.bytes));
-    }
-
-    page_resolution::load_book_thumbnail_page_source_bytes(
-        app.book_media_reader.as_ref(),
-        app.book_media_content.as_ref(),
-        book_id,
-        media,
-    )
-    .await
+        .map(|thumbnail| thumbnail.thumbnail))
 }
 
 pub(super) async fn load_series_thumbnail(
@@ -216,14 +268,12 @@ pub(super) async fn load_readlist_mosaic_bytes(
 
     let mut images = Vec::new();
     for book_id in book_ids {
-        if let Some(media) = app.thumbnail_reader.book_media(&book_id).await?
-            && let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id, &media).await?
-        {
+        if let Some(bytes) = load_book_thumbnail_source_bytes(app, &book_id).await? {
             images.push(bytes);
         }
     }
 
-    Ok(encode_mosaic_jpeg(&images))
+    encode_mosaic_off_thread(images).await
 }
 
 pub(super) async fn load_collection_mosaic_bytes(
@@ -242,7 +292,7 @@ pub(super) async fn load_collection_mosaic_bytes(
         }
     }
 
-    Ok(encode_mosaic_jpeg(&images))
+    encode_mosaic_off_thread(images).await
 }
 
 pub(super) async fn parse_thumbnail_upload(
