@@ -37,7 +37,7 @@ pub async fn analyze_book(
         });
     }
 
-    let Some(input) = analyze_book_input(runtime.database().read_pool(), &book_id)
+    let Some(input) = analyze_book_input(runtime.database().task_read_pool(), &book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -97,12 +97,12 @@ pub async fn analyze_book(
     };
     let current_page_count = persisted.page_count.min(i64::MAX as u64) as i64;
 
-    persist_book_analysis(runtime.database().write_pool(), &book_id, &persisted)
+    persist_book_analysis(runtime.database().task_write_pool(), &book_id, &persisted)
         .await
         .map_err(TaskProcessingError::runtime)?;
 
     adjust_analyzed_book_read_progress(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         &book_id,
         &input.series_id,
         input.previous_media_status,
