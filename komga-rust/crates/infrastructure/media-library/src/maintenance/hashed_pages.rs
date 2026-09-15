@@ -123,7 +123,7 @@ pub async fn remove_hashed_pages(
         .collect::<Vec<_>>();
 
     persist_removed_hashed_pages(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         runtime.runtime_events(),
         &book_id,
         &deleted_count_by_hash,
@@ -136,7 +136,7 @@ pub async fn remove_hashed_pages(
     crate::analysis::analyze_book(runtime, analyze_book_id.as_str()).await?;
 
     persist_duplicate_page_deleted_events(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         &book_id,
         &source.series_id,
         &source.file_path,
@@ -178,7 +178,7 @@ pub(crate) async fn load_book_archive_source(
     book_id: &str,
 ) -> Result<Option<BookArchiveSource>, TaskProcessingError> {
     Ok(
-        load_persisted_book_archive_source(runtime.database().read_pool(), book_id)
+        load_persisted_book_archive_source(runtime.database().task_read_pool(), book_id)
             .await
             .map_err(TaskProcessingError::runtime)?
             .map(|source| BookArchiveSource {
@@ -195,7 +195,7 @@ async fn load_book_hashed_pages(
     runtime: &MediaLibraryJobContext,
     book_id: &str,
 ) -> Result<Vec<HashedPageToDelete>, TaskProcessingError> {
-    load_persisted_book_hashed_pages(runtime.database().read_pool(), book_id)
+    load_persisted_book_hashed_pages(runtime.database().task_read_pool(), book_id)
         .await
         .map(|pages| {
             pages

@@ -18,7 +18,7 @@ pub async fn hash_book_pages(
     runtime: &MediaLibraryJobContext,
     book_id: &str,
 ) -> Result<(), TaskProcessingError> {
-    let Some(library_id) = load_book_library_id(runtime.database().read_pool(), book_id)
+    let Some(library_id) = load_book_library_id(runtime.database().task_read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -29,7 +29,7 @@ pub async fn hash_book_pages(
         return Ok(());
     }
 
-    persist_book_page_hashes_from_media_content(runtime.database().read_pool(), book_id)
+    persist_book_page_hashes_from_media_content(runtime.database().task_read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)
 }
@@ -43,7 +43,7 @@ pub async fn hash_book(
         return Ok(());
     }
 
-    let Some(state) = load_book_hash_runtime_state(runtime.database().read_pool(), book_id)
+    let Some(state) = load_book_hash_runtime_state(runtime.database().task_read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -74,7 +74,7 @@ pub async fn hash_book(
         }
     }
 
-    let Some(file_path) = load_book_file_path(runtime.database().read_pool(), book_id)
+    let Some(file_path) = load_book_file_path(runtime.database().task_read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -96,7 +96,7 @@ pub async fn hash_book(
         .map(|value| format!("{value:02x}"))
         .collect::<String>();
 
-    persist_book_hash(runtime.database().write_pool(), book_id, &hash, koreader)
+    persist_book_hash(runtime.database().task_write_pool(), book_id, &hash, koreader)
         .await
         .map_err(TaskProcessingError::runtime)
 }
@@ -106,7 +106,7 @@ pub async fn find_duplicate_pages_to_delete(
     library_id: &str,
 ) -> Result<HashMap<String, Vec<HashedPageToDelete>>, TaskProcessingError> {
     let persisted =
-        load_persisted_duplicate_pages_to_delete(runtime.database().read_pool(), library_id)
+        load_persisted_duplicate_pages_to_delete(runtime.database().task_read_pool(), library_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
 

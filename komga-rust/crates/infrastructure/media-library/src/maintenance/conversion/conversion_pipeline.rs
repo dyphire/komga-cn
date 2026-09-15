@@ -59,14 +59,14 @@ pub async fn find_books_to_convert(
     library_id: &str,
 ) -> Result<Vec<PersistedBookToConvert>, TaskProcessingError> {
     let maintenance_flags =
-        load_library_maintenance_flags(runtime.database().read_pool(), library_id)
+        load_library_maintenance_flags(runtime.database().task_read_pool(), library_id)
             .await
             .map_err(TaskProcessingError::runtime)?;
     if !maintenance_flags.convert_to_cbz {
         return Ok(Vec::new());
     }
 
-    load_books_to_convert(runtime.database().read_pool(), library_id)
+    load_books_to_convert(runtime.database().task_read_pool(), library_id)
         .await
         .map_err(TaskProcessingError::runtime)
 }
@@ -77,7 +77,7 @@ pub async fn convert_book(
 ) -> Result<(), TaskProcessingError> {
     let book_id = book_id.to_string();
 
-    let Some(source) = load_book_conversion_target(runtime.database().read_pool(), &book_id)
+    let Some(source) = load_book_conversion_target(runtime.database().task_read_pool(), &book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -199,7 +199,7 @@ pub async fn convert_book(
     };
 
     if let Err(error) = persist_book_conversion(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         runtime.runtime_events(),
         &book_id,
         &source.library_id,
@@ -222,7 +222,7 @@ pub async fn convert_book(
     .await
     .unwrap_or(false);
     persist_book_conversion_events(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         &book_id,
         &source.series_id,
         &conversion.source_path,
@@ -232,18 +232,18 @@ pub async fn convert_book(
     .await
     .map_err(TaskProcessingError::runtime)?;
 
-    let previous_hashed_pages = load_book_hashed_pages(runtime.database().read_pool(), &book_id)
+    let previous_hashed_pages = load_book_hashed_pages(runtime.database().task_read_pool(), &book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
 
     crate::analysis::analyze_book(runtime, &book_id).await?;
 
-    let analyzed_pages = load_book_hashed_pages(runtime.database().read_pool(), &book_id)
+    let analyzed_pages = load_book_hashed_pages(runtime.database().task_read_pool(), &book_id)
         .await
         .map_err(TaskProcessingError::runtime)?;
     let page_hashes_to_restore = restored_page_hashes(&analyzed_pages, &previous_hashed_pages);
     persist_book_page_hashes(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         &book_id,
         &page_hashes_to_restore,
     )

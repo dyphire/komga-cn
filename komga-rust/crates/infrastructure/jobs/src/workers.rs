@@ -721,7 +721,7 @@ pub async fn cleanup_authentication_activity_once(
     }
 
     komga_infrastructure_identity::persisted_cleanup_authentication_activity(
-        runtime.job().database().main_db().write_pool(),
+        runtime.job().database().task_write_pool(),
     )
     .await
     .map_err(|error| {
