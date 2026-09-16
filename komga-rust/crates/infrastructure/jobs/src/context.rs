@@ -107,6 +107,8 @@ impl TaskRuntimeContext {
         });
         let media_library = MediaLibraryJobContext::new(
             main_db.clone(),
+            task_read_pool.clone(),
+            task_write_pool.clone(),
             ownership.owns_main_database,
             ownership.owns_filesystem_scan_output,
             runtime_events.clone(),

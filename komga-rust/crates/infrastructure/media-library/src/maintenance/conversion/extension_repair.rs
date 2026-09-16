@@ -14,7 +14,7 @@ pub async fn repair_extension(
     runtime: &MediaLibraryJobContext,
     book_id: &str,
 ) -> Result<(), TaskProcessingError> {
-    let Some(row) = load_book_for_extension_repair(runtime.database().read_pool(), book_id)
+    let Some(row) = load_book_for_extension_repair(runtime.database().task_read_pool(), book_id)
         .await
         .map_err(TaskProcessingError::runtime)?
     else {
@@ -109,7 +109,7 @@ pub async fn repair_extension(
             .map_err(TaskProcessingError::runtime)?;
 
     let repair_result = persist_book_extension_repair(
-        runtime.database().write_pool(),
+        runtime.database().task_write_pool(),
         &book_id,
         &library_id,
         &book_url,
@@ -176,8 +176,12 @@ mod tests {
             let main_db = DatabaseHandle::file_backed(self.database_file.clone())
                 .await
                 .expect("repair-extensions main db should open");
+            let task_read_pool = main_db.read_pool().clone();
+            let task_write_pool = main_db.write_pool().clone();
             MediaLibraryJobContext::new(
                 main_db,
+                task_read_pool,
+                task_write_pool,
                 true,
                 true,
                 Arc::new(RuntimeSseEventStore::default()),

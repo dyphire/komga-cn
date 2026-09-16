@@ -10,6 +10,8 @@ use komga_infrastructure_base::DatabaseHandle;
 #[derive(Clone)]
 pub struct MediaLibraryJobContext {
     main_db: DatabaseHandle,
+    task_read_pool: SqlitePool,
+    task_write_pool: SqlitePool,
     owns_main_database: bool,
     owns_filesystem_scan_output: bool,
     runtime_events: Arc<dyn RuntimeSseEventSink>,
@@ -34,6 +36,8 @@ pub struct MediaLibraryFilesystemContext<'a> {
 impl MediaLibraryJobContext {
     pub fn new(
         main_db: DatabaseHandle,
+        task_read_pool: SqlitePool,
+        task_write_pool: SqlitePool,
         owns_main_database: bool,
         owns_filesystem_scan_output: bool,
         runtime_events: Arc<dyn RuntimeSseEventSink>,
@@ -41,6 +45,8 @@ impl MediaLibraryJobContext {
     ) -> Self {
         Self {
             main_db,
+            task_read_pool,
+            task_write_pool,
             owns_main_database,
             owns_filesystem_scan_output,
             runtime_events,
@@ -111,6 +117,14 @@ impl MediaLibraryDatabaseContext<'_> {
 
     pub fn write_pool(&self) -> &SqlitePool {
         self.context.main_db.write_pool()
+    }
+
+    pub fn task_read_pool(&self) -> &SqlitePool {
+        &self.context.task_read_pool
+    }
+
+    pub fn task_write_pool(&self) -> &SqlitePool {
+        &self.context.task_write_pool
     }
 
     pub fn owns_main_database(&self) -> bool {

@@ -69,8 +69,8 @@ impl SqliteFilesystemLibraryScanPipeline {
         Ok(Self {
             owns_main_database: runtime.database().owns_main_database(),
             owns_filesystem_scan_output: runtime.filesystem().owns_filesystem_scan_output(),
-            task_read_pool: runtime.database().read_pool().clone(),
-            task_write_pool: runtime.database().write_pool().clone(),
+            task_read_pool: runtime.database().task_read_pool().clone(),
+            task_write_pool: runtime.database().task_write_pool().clone(),
             cleanup_empty_sets_policy,
             runtime_events: runtime.runtime_events_arc(),
             contribution_cleanup: runtime.contribution_cleanup(),
