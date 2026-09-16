@@ -716,7 +716,25 @@ pub(crate) async fn collection_update(
         .update_collection(&collection_id, input)
         .await
     {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            // Membership changed: invalidate any auto-generated (mosaic)
+            // thumbnail so the next request rebuilds it from current members.
+            // User-uploaded thumbnails are kept.
+            if payload.get("seriesIds").is_some() {
+                if let Err(error) = app
+                    .thumbnails
+                    .delete_generated_collection(&collection_id)
+                    .await
+                {
+                    tracing::warn!(
+                        collection_id,
+                        %error,
+                        "failed to invalidate generated collection thumbnail"
+                    );
+                }
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(error) => collection_mutation_error_response(error, path.as_str()),
     }
