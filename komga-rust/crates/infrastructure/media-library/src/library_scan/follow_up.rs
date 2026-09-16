@@ -318,6 +318,7 @@ VALUES (?, datetime(?, 'unixepoch'), ?, ?, ?, ?, ?, ?, 0, ?)"#,
             task_types,
             vec![
                 "AnalyzeBook",
+                "HashBook",
                 "FindDuplicatePagesToDelete",
                 "RefreshSeriesMetadata",
                 "RefreshBookMetadata",

@@ -5,6 +5,7 @@ use anyhow::Context;
 use komga_domain::discovery::MediaStatus;
 use komga_epub::{MOBI_MEDIA_TYPE, analyze_epub_archive, normalize_mobi};
 use lopdf::{Document as PdfDocument, Object};
+use sha2::{Digest, Sha256};
 
 use komga_infrastructure_media_core::content::metadata_sources::{
     CapturedMetadataDocument, CapturedMetadataSources, MetadataSourceRequest,
@@ -27,6 +28,7 @@ const IMAGE_DIMENSIONS_MAX_READ_BYTES: usize = 1024 * 1024;
 pub enum MediaAnalysisProfile {
     PersistedBook {
         include_dimensions: bool,
+        include_page_hashes: bool,
         metadata_sources: MetadataSourceRequest,
     },
     Transient,
@@ -39,6 +41,15 @@ impl MediaAnalysisProfile {
                 include_dimensions, ..
             } => include_dimensions,
             Self::Transient => true,
+        }
+    }
+
+    fn include_page_hashes(self) -> bool {
+        match self {
+            Self::PersistedBook {
+                include_page_hashes, ..
+            } => include_page_hashes,
+            Self::Transient => false,
         }
     }
 
@@ -115,6 +126,7 @@ pub struct AnalyzedMediaPage {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub file_size: i64,
+    pub file_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -306,6 +318,7 @@ pub fn analyze_book_media_file(
     analyze_book_media_file_with_sources(
         file_path,
         analyze_dimensions,
+        false,
         MetadataSourceRequest::default(),
     )
 }
@@ -313,12 +326,14 @@ pub fn analyze_book_media_file(
 pub fn analyze_book_media_file_with_sources(
     file_path: &Path,
     analyze_dimensions: bool,
+    include_page_hashes: bool,
     metadata_sources: MetadataSourceRequest,
 ) -> anyhow::Result<MediaFileAnalysis> {
     MediaFileAnalyzer.analyze(
         file_path,
         MediaAnalysisProfile::PersistedBook {
             include_dimensions: analyze_dimensions,
+            include_page_hashes,
             metadata_sources,
         },
     )
@@ -528,6 +543,16 @@ pub struct ImageDimensions {
     pub height: u32,
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher
+        .finalize()
+        .iter()
+        .map(|value| format!("{value:02x}"))
+        .collect()
+}
+
 pub fn image_dimensions_from_bytes_u32(bytes: &[u8]) -> Option<ImageDimensions> {
     let dimensions = image_dimensions_from_bytes_i64(bytes)?;
     Some(ImageDimensions {
@@ -633,6 +658,7 @@ fn analyze_single_image(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileCon
             width: dimensions.width,
             height: dimensions.height,
             file_size: size_bytes,
+            file_hash: None,
         }],
         files: vec![file_name],
         ..Default::default()
@@ -698,6 +724,66 @@ fn analyze_zip_media_pages(
             continue;
         }
 
+        if profile.include_page_hashes() {
+            // Stream the full entry once: head bytes feed dimension decoding,
+            // the whole payload feeds the SHA-256 hasher. Avoids a second
+            // decompression pass in the standalone page-hash task.
+            let mut bytes = Vec::new();
+            match entry.read_to_end(&mut bytes) {
+                Ok(_) => {}
+                Err(_) => {
+                    entry_errors.push(file_name.clone());
+                    media_files.push(AnalyzedMediaFile {
+                        file_name,
+                        media_type: None,
+                        sub_type: None,
+                        file_size: None,
+                    });
+                    continue;
+                }
+            }
+            let media_type = if is_known_image {
+                media_type_from_name
+            } else {
+                media_type_from_entry_bytes(&file_name, &bytes)
+            };
+            if !media_type.starts_with("image/") {
+                media_files.push(AnalyzedMediaFile {
+                    file_name,
+                    media_type: Some(media_type),
+                    sub_type: None,
+                    file_size,
+                });
+                continue;
+            }
+            let dimensions = if profile.include_dimensions() {
+                image_dimensions_from_bytes_i64(&bytes)
+            } else {
+                None
+            };
+            if profile.include_dimensions() && dimensions.is_none() {
+                entry_errors.push(file_name.clone());
+                media_files.push(AnalyzedMediaFile {
+                    file_name,
+                    media_type: None,
+                    sub_type: None,
+                    file_size: None,
+                });
+                continue;
+            }
+            let dimensions = analyzed_media_page_dimensions(dimensions);
+            let file_hash = sha256_hex(&bytes);
+            pages.push(AnalyzedMediaPage {
+                media_type,
+                file_name,
+                width: dimensions.width,
+                height: dimensions.height,
+                file_size: file_size.unwrap_or(i64::MAX),
+                file_hash: Some(file_hash),
+            });
+            continue;
+        }
+
         if is_known_image {
             if !profile.include_dimensions() || is_vector_image {
                 pages.push(AnalyzedMediaPage {
@@ -706,6 +792,7 @@ fn analyze_zip_media_pages(
                     width: None,
                     height: None,
                     file_size: file_size.unwrap_or(i64::MAX),
+                    file_hash: None,
                 });
                 continue;
             }
@@ -718,6 +805,7 @@ fn analyze_zip_media_pages(
                         width: dimensions.width,
                         height: dimensions.height,
                         file_size: file_size.unwrap_or(i64::MAX),
+                        file_hash: None,
                     });
                 }
                 Ok(None) | Err(_) => {
@@ -779,6 +867,7 @@ fn analyze_zip_media_pages(
             width: dimensions.width,
             height: dimensions.height,
             file_size: file_size.unwrap_or(i64::MAX),
+            file_hash: None,
         });
     }
 
@@ -842,7 +931,10 @@ fn analyze_epub_media_pages(
     let mut archive = zip::ZipArchive::new(file).context("open EPUB archive for analysis")?;
     let analysis = analyze_epub_archive(&mut archive, request.epub)
         .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
-    let mut archive = if profile.include_dimensions() || request.comicinfo {
+    let mut archive = if profile.include_dimensions()
+        || request.comicinfo
+        || profile.include_page_hashes()
+    {
         let file = std::fs::File::open(file_path).map_err(|error| {
             let debug = format!("{error:?}");
             anyhow::Error::new(error).context(format!(
@@ -864,9 +956,31 @@ fn analyze_epub_media_pages(
         .pages
         .into_iter()
         .map(|page| {
-            let dimensions = if profile.include_dimensions()
-                && page.media_type.starts_with("image/")
-            {
+            let is_image_page = page.media_type.starts_with("image/");
+            if profile.include_page_hashes() && is_image_page {
+                // Stream the full image once: head bytes feed dimension
+                // decoding, the whole payload feeds the SHA-256 hasher.
+                let archive = archive
+                    .as_mut()
+                    .expect("EPUB archive is opened when page hashes are enabled");
+                let bytes = read_epub_image_bytes(archive, &page.file_name)?;
+                let dimensions = if profile.include_dimensions() {
+                    image_dimensions_from_bytes_i64(&bytes)
+                } else {
+                    None
+                };
+                let dimensions = analyzed_media_page_dimensions(dimensions);
+                let file_hash = sha256_hex(&bytes);
+                return Ok(AnalyzedMediaPage {
+                    file_name: page.file_name,
+                    media_type: page.media_type,
+                    width: dimensions.width,
+                    height: dimensions.height,
+                    file_size: page.file_size,
+                    file_hash: Some(file_hash),
+                });
+            }
+            let dimensions = if profile.include_dimensions() && is_image_page {
                 let archive = archive
                     .as_mut()
                     .expect("EPUB archive is opened when dimensions are enabled");
@@ -888,6 +1002,7 @@ fn analyze_epub_media_pages(
                 width: dimensions.width,
                 height: dimensions.height,
                 file_size: page.file_size,
+                file_hash: None,
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
@@ -937,6 +1052,20 @@ fn read_epub_image_dimensions<R: Read + std::io::Seek>(
     })
 }
 
+fn read_epub_image_bytes<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    file_name: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let mut entry = archive.by_name(file_name).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read EPUB image '{file_name}'"))
+    })?;
+    let mut bytes = Vec::new();
+    entry.read_to_end(&mut bytes).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("read EPUB image bytes '{file_name}'"))
+    })?;
+    Ok(bytes)
+}
+
 fn analyze_mobi_media_pages(
     file_path: &Path,
     profile: MediaAnalysisProfile,
@@ -976,6 +1105,7 @@ fn analyze_mobi_media_pages(
             width: None,
             height: None,
             file_size: 0,
+            file_hash: None,
         })
         .collect::<Vec<_>>();
 
@@ -1085,10 +1215,14 @@ fn analyze_rar_media_pages(
             });
             continue;
         }
+        let file_hash = profile
+            .include_page_hashes()
+            .then(|| sha256_hex(&entry.bytes));
         pages.push(analyzed_rar_media_page(
             entry.file_name.clone(),
             entry.unpacked_size,
             dimensions,
+            file_hash,
         ));
     }
 
@@ -1152,6 +1286,7 @@ fn analyze_pdf_media_pages(
                 width: dimensions.width,
                 height: dimensions.height,
                 file_size: 0,
+                file_hash: None,
             }
         })
         .collect::<Vec<_>>();
@@ -1175,6 +1310,7 @@ fn analyzed_rar_media_page(
     file_name: String,
     unpacked_size: u64,
     dimensions: Option<MediaDimensions>,
+    file_hash: Option<String>,
 ) -> AnalyzedMediaPage {
     let dimensions = analyzed_media_page_dimensions(dimensions);
     AnalyzedMediaPage {
@@ -1183,6 +1319,7 @@ fn analyzed_rar_media_page(
         width: dimensions.width,
         height: dimensions.height,
         file_size: unpacked_size.try_into().unwrap_or(i64::MAX),
+        file_hash,
     }
 }
 
@@ -1447,6 +1584,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: true,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("pdf should analyze");
@@ -1512,6 +1650,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("persisted invalid pdf analysis should record media error");
@@ -1532,6 +1671,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("missing persisted media should be recorded");
@@ -1554,6 +1694,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("filesystem probe error should be persisted as media error");
@@ -1586,6 +1727,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("ZIP content with EPUB extension should analyze as ZIP");
@@ -1607,6 +1749,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("unsupported persisted media should be recorded");
@@ -1628,6 +1771,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("rar4 fixture analysis should succeed");
@@ -1651,6 +1795,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("encrypted RAR analysis should be recorded");
@@ -1672,6 +1817,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("invalid mobi should be represented as media error");
@@ -1696,6 +1842,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("local MOBI sample should analyze");
@@ -1724,6 +1871,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("EPUB fixture analysis should succeed");
@@ -1753,6 +1901,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: false,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("fixed-layout EPUB fixture analysis should succeed");
@@ -1773,6 +1922,7 @@ mod tests {
                 MediaAnalysisProfile::PersistedBook {
                     include_dimensions: true,
                     metadata_sources: MetadataSourceRequest::default(),
+                    include_page_hashes: false,
                 },
             )
             .expect("rar4 fixture analysis should succeed");

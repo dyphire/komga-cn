@@ -8,6 +8,7 @@ pub(super) struct BookAnalysisInput {
     pub(super) url: String,
     pub(super) root: String,
     pub(super) analyze_dimensions: bool,
+    pub(super) hash_pages: bool,
     pub(super) series_id: String,
     pub(super) previous_media_status: Option<MediaStatus>,
     pub(super) previous_page_count: i64,
@@ -21,6 +22,7 @@ pub(super) struct AnalyzedBookPage {
     pub(super) width: Option<i64>,
     pub(super) height: Option<i64>,
     pub(super) file_size: i64,
+    pub(super) file_hash: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +55,7 @@ pub(super) async fn analyze_book_input(
              b.URL AS URL,
              b.SERIES_ID AS SERIES_ID,
              l.ANALYZE_DIMENSIONS AS ANALYZE_DIMENSIONS,
+             l.HASH_PAGES AS HASH_PAGES,
              l.IMPORT_COMICINFO_BOOK AS IMPORT_COMICINFO_BOOK,
              l.IMPORT_COMICINFO_READLIST AS IMPORT_COMICINFO_READLIST,
              l.IMPORT_COMICINFO_SERIES AS IMPORT_COMICINFO_SERIES,
@@ -85,6 +88,7 @@ pub(super) async fn analyze_book_input(
             url: sqlx::Row::get::<String, _>(&row, "URL"),
             root: sqlx::Row::get::<String, _>(&row, "ROOT"),
             analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
+            hash_pages: sqlx::Row::get::<bool, _>(&row, "HASH_PAGES"),
             series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
             previous_media_status: MediaStatus::parse(
                 sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS").as_str(),
@@ -145,7 +149,7 @@ pub(super) async fn persist_book_analysis(
                     .push_bind(book_id)
                     .push_bind(page.width)
                     .push_bind(page.height)
-                    .push_bind("")
+                    .push_bind(page.file_hash.clone().unwrap_or_default())
                     .push_bind(page.file_size);
             });
             builder

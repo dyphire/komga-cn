@@ -959,7 +959,7 @@ async fn series_search_unpaged_ids(
     full_text_search: Option<&str>,
     condition: Value,
 ) -> Value {
-    let mut uri = String::from("/api/v1/series/list?page=0&size=20&unpaged=true");
+    let uri = String::from("/api/v1/series/list?page=0&size=20&unpaged=true");
     let mut payload = json!({
         "condition": condition,
     });

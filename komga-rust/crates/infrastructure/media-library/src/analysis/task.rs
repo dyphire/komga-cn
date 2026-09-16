@@ -56,6 +56,7 @@ pub async fn analyze_book(
     let analysis = analyze_book_media_file_with_sources(
         &file_path,
         input.analyze_dimensions,
+        input.hash_pages,
         metadata_sources,
     )
     .map_err(|error| {
@@ -81,6 +82,7 @@ pub async fn analyze_book(
                 width: page.width,
                 height: page.height,
                 file_size: page.file_size,
+                file_hash: page.file_hash,
             })
             .collect(),
         media_files: analysis
