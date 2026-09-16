@@ -100,10 +100,10 @@ fn matches_string_inclusion<T>(
     match condition {
         InclusionCondition::Include(values) => values
             .iter()
-            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+            .any(|expected| actual == value(expected)),
         InclusionCondition::Exclude(values) => !values
             .iter()
-            .any(|expected| actual.eq_ignore_ascii_case(value(expected))),
+            .any(|expected| actual == value(expected)),
     }
 }
 
