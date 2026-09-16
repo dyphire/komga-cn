@@ -115,32 +115,48 @@ pub(super) async fn persist_book_analysis(
                 .context(format!("failed to clear MEDIA_PAGE rows for '{book_id}'"))
         })?;
 
-    for (index, page) in analysis.pages.iter().enumerate() {
-        sqlx::query(
-            r#"INSERT INTO MEDIA_PAGE (
-            FILE_NAME,
-            MEDIA_TYPE,
-            NUMBER,
-            BOOK_ID,
-            width,
-            height,
-            FILE_HASH,
-            FILE_SIZE
-        ) VALUES (?, ?, ?, ?, ?, ?, '', ?)"#,
-        )
-        .bind(&page.file_name)
-        .bind(&page.media_type)
-        .bind(index as i64)
-        .bind(book_id)
-        .bind(page.width)
-        .bind(page.height)
-        .bind(page.file_size)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error)
-                .context(format!("failed to insert MEDIA_PAGE row for '{book_id}'"))
-        })?;
+    if !analysis.pages.is_empty() {
+        // Batch multi-row INSERT: up to 2000 pages per statement instead of one
+        // statement per page (a 1000-page book: 1000 statements -> 1). 2000 x 8
+        // bound variables stays well below SQLite's 32766 limit (3.32+).
+        const MEDIA_PAGE_INSERT_BATCH: usize = 2000;
+        for (chunk_index, chunk) in analysis
+            .pages
+            .chunks(MEDIA_PAGE_INSERT_BATCH)
+            .enumerate()
+        {
+            let chunk_start = chunk_index * MEDIA_PAGE_INSERT_BATCH;
+            let mut builder = sqlx::QueryBuilder::new(
+                r#"INSERT INTO MEDIA_PAGE (
+                FILE_NAME,
+                MEDIA_TYPE,
+                NUMBER,
+                BOOK_ID,
+                width,
+                height,
+                FILE_HASH,
+                FILE_SIZE
+            )"#,
+            );
+            builder.push_values(chunk.iter().enumerate(), |mut b, (offset, page)| {
+                b.push_bind(&page.file_name)
+                    .push_bind(&page.media_type)
+                    .push_bind((chunk_start + offset) as i64)
+                    .push_bind(book_id)
+                    .push_bind(page.width)
+                    .push_bind(page.height)
+                    .push_bind("")
+                    .push_bind(page.file_size);
+            });
+            builder
+                .build()
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!(error)
+                        .context(format!("failed to insert MEDIA_PAGE rows for '{book_id}'"))
+                })?;
+        }
     }
 
     sqlx::query("DELETE FROM MEDIA_FILE WHERE BOOK_ID = ?")
