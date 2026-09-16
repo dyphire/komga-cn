@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use super::scan_sse::RuntimeSseRecord;
 
@@ -38,6 +39,10 @@ pub(crate) struct ScannedLibrary {
     pub(crate) series_ids_requiring_book_sync: HashSet<String>,
     pub(crate) discovered_series_ids: HashSet<String>,
     pub(crate) discovered_book_ids: HashSet<String>,
+    /// Absolute paths of directories (or entries) whose contents could not be
+    /// fully read during discovery. Rows located under these paths must NOT be
+    /// treated as missing/deleted, because we simply do not know their state.
+    pub(crate) failed_directories: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]

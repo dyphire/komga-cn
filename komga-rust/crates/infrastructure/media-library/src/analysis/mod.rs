@@ -170,8 +170,9 @@ impl MediaFileAnalyzer {
                 ));
             }
             Err(error) => {
-                let error = anyhow::anyhow!(error).context(format!(
-                    "check media file existence '{}': ",
+                let debug = format!("{error:?}");
+                let error = anyhow::Error::new(error).context(format!(
+                    "check media file existence '{}': {debug}",
                     file_path.display()
                 ));
                 if profile.records_analysis_error() {
@@ -564,13 +565,21 @@ fn analyze_single_image(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileCon
         .unwrap_or_default()
         .to_string();
     let metadata = std::fs::metadata(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read image metadata '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read image metadata '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let size_bytes = i64::try_from(metadata.len()).map_err(|error| {
         anyhow::anyhow!(error).context(format!("image file too large '{}'", file_path.display()))
     })?;
     let bytes = std::fs::read(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read image bytes '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read image bytes '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let dimensions = image_dimensions_from_bytes_i64(&bytes).ok_or_else(|| {
         anyhow::anyhow!(format!("decode image dimensions '{}'", file_path.display()))
@@ -597,7 +606,11 @@ fn analyze_zip_media_pages(
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
     let file = std::fs::File::open(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open zip file '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "open zip file '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let mut archive = zip::ZipArchive::new(file).map_err(|error| {
         anyhow::anyhow!(error).context(format!("open zip archive '{}': ", file_path.display()))
@@ -779,7 +792,11 @@ fn read_epub_image_dimensions(
 
 fn analyze_mobi_media_pages(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileContents> {
     let bytes = std::fs::read(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read MOBI file '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read MOBI file '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let publication = normalize_mobi(&bytes).map_err(|error| {
         anyhow::anyhow!(error).context(format!("normalize MOBI file '{}': ", file_path.display()))
@@ -1037,14 +1054,22 @@ fn detected_media_type_from_path(path: &Path) -> anyhow::Result<String> {
         .unwrap_or_default();
     let fallback = persisted_media_type_from_file_name(file_name);
     let mut file = std::fs::File::open(path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("detect media type '{}': ", path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "detect media type '{}': {debug}",
+            path.display()
+        ))
     })?;
     let mut header = Vec::new();
     file.by_ref()
         .take(IMAGE_DIMENSIONS_MAX_READ_BYTES as u64)
         .read_to_end(&mut header)
         .map_err(|error| {
-            anyhow::anyhow!(error).context(format!("read media header '{}': ", path.display()))
+            let debug = format!("{error:?}");
+            anyhow::Error::new(error).context(format!(
+                "read media header '{}': {debug}",
+                path.display()
+            ))
         })?;
 
     if header.starts_with(b"Rar!\x1A\x07") {
