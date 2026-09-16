@@ -7,6 +7,7 @@ pub(super) struct BookAnalysisInput {
     pub(super) url: String,
     pub(super) root: String,
     pub(super) analyze_dimensions: bool,
+    pub(super) hash_pages: bool,
     pub(super) series_id: String,
     pub(super) previous_media_status: Option<MediaStatus>,
     pub(super) previous_page_count: i64,
@@ -19,6 +20,7 @@ pub(super) struct AnalyzedBookPage {
     pub(super) width: Option<i64>,
     pub(super) height: Option<i64>,
     pub(super) file_size: i64,
+    pub(super) file_hash: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +53,7 @@ pub(super) async fn analyze_book_input(
              b.URL AS URL,
              b.SERIES_ID AS SERIES_ID,
              l.ANALYZE_DIMENSIONS AS ANALYZE_DIMENSIONS,
+             l.HASH_PAGES AS HASH_PAGES,
              COALESCE(m.STATUS, '') AS PREVIOUS_MEDIA_STATUS,
              COALESCE(m.PAGE_COUNT, 0) AS PREVIOUS_PAGE_COUNT,
              l.ROOT AS ROOT
@@ -70,6 +73,7 @@ pub(super) async fn analyze_book_input(
         url: sqlx::Row::get::<String, _>(&row, "URL"),
         root: sqlx::Row::get::<String, _>(&row, "ROOT"),
         analyze_dimensions: sqlx::Row::get::<bool, _>(&row, "ANALYZE_DIMENSIONS"),
+        hash_pages: sqlx::Row::get::<bool, _>(&row, "HASH_PAGES"),
         series_id: sqlx::Row::get::<String, _>(&row, "SERIES_ID"),
         previous_media_status: MediaStatus::parse(
             sqlx::Row::get::<String, _>(&row, "PREVIOUS_MEDIA_STATUS").as_str(),
@@ -109,7 +113,7 @@ pub(super) async fn persist_book_analysis(
             height,
             FILE_HASH,
             FILE_SIZE
-        ) VALUES (?, ?, ?, ?, ?, ?, '', ?)"#,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(&page.file_name)
         .bind(&page.media_type)
@@ -117,6 +121,7 @@ pub(super) async fn persist_book_analysis(
         .bind(book_id)
         .bind(page.width)
         .bind(page.height)
+        .bind(page.file_hash.clone().unwrap_or_default())
         .bind(page.file_size)
         .execute(&mut *tx)
         .await

@@ -587,7 +587,7 @@ mod tests {
     }
 
     fn analyzed_fixture_page_count(file_name: &str, _book_url: &str) -> i64 {
-        analyze_book_media_file(&archive_fixture_path(file_name), false)
+        analyze_book_media_file(&archive_fixture_path(file_name), false, false)
             .expect("analyze-book fixture should be analyzable")
             .pages
             .len() as i64
