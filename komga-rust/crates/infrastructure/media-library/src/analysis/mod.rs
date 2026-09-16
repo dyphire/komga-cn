@@ -194,8 +194,9 @@ impl MediaFileAnalyzer {
                 ));
             }
             Err(error) => {
-                let error = anyhow::anyhow!(error).context(format!(
-                    "check media file existence '{}': ",
+                let debug = format!("{error:?}");
+                let error = anyhow::Error::new(error).context(format!(
+                    "check media file existence '{}': {debug}",
                     file_path.display()
                 ));
                 if profile.records_analysis_error() {
@@ -602,13 +603,21 @@ fn analyze_single_image(file_path: &Path) -> anyhow::Result<AnalyzedMediaFileCon
         .unwrap_or_default()
         .to_string();
     let metadata = std::fs::metadata(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read image metadata '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read image metadata '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let size_bytes = i64::try_from(metadata.len()).map_err(|error| {
         anyhow::anyhow!(error).context(format!("image file too large '{}'", file_path.display()))
     })?;
     let bytes = std::fs::read(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read image bytes '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read image bytes '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let dimensions = image_dimensions_from_bytes_i64(&bytes).ok_or_else(|| {
         anyhow::anyhow!(format!("decode image dimensions '{}'", file_path.display()))
@@ -635,7 +644,11 @@ fn analyze_zip_media_pages(
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
     let file = std::fs::File::open(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open zip file '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "open zip file '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let mut archive = zip::ZipArchive::new(file).map_err(|error| {
         anyhow::anyhow!(error).context(format!("open zip archive '{}': ", file_path.display()))
@@ -781,7 +794,7 @@ fn analyze_zip_media_pages(
         )
     });
     let metadata_sources =
-        capture_comicinfo(&mut archive, profile.metadata_source_request().comicinfo);
+        capture_comicinfo(Some(&mut archive), profile.metadata_source_request().comicinfo);
     Ok(AnalyzedMediaFileContents {
         page_count: pages.len() as u64,
         pages,
@@ -797,16 +810,19 @@ fn analyze_zip_media_pages(
 }
 
 fn capture_comicinfo<R: std::io::Read + std::io::Seek>(
-    archive: &mut zip::ZipArchive<R>,
+    archive: Option<&mut zip::ZipArchive<R>>,
     requested: bool,
 ) -> CapturedMetadataDocument {
     if !requested {
         return CapturedMetadataDocument::NotRequested;
     }
-    match read_comicinfo_from_zip_archive(archive) {
-        Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
-        Ok(None) => CapturedMetadataDocument::Absent,
-        Err(error) => CapturedMetadataDocument::Failed(format!("{error:#}")),
+    match archive {
+        Some(archive) => match read_comicinfo_from_zip_archive(archive) {
+            Ok(Some(bytes)) => CapturedMetadataDocument::Present(bytes),
+            Ok(None) => CapturedMetadataDocument::Absent,
+            Err(error) => CapturedMetadataDocument::Failed(format!("{error:#}")),
+        },
+        None => CapturedMetadataDocument::Failed("archive unavailable".to_string()),
     }
 }
 
@@ -815,14 +831,22 @@ fn analyze_epub_media_pages(
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
     let request = profile.metadata_source_request();
-    let file = std::fs::File::open(file_path).context("open EPUB for analysis")?;
+    let file = std::fs::File::open(file_path)
+        .map_err(|error| {
+            let debug = format!("{error:?}");
+            anyhow::Error::new(error).context(format!(
+                "open EPUB for analysis '{}': {debug}",
+                file_path.display()
+            ))
+        })?;
     let mut archive = zip::ZipArchive::new(file).context("open EPUB archive for analysis")?;
     let analysis = analyze_epub_archive(&mut archive, request.epub)
         .map_err(|error| anyhow::anyhow!(error).context("analyze EPUB publication"))?;
-    let mut archive = if profile.include_dimensions() {
+    let mut archive = if profile.include_dimensions() || request.comicinfo {
         let file = std::fs::File::open(file_path).map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "open EPUB for dimensions '{}': ",
+            let debug = format!("{error:?}");
+            anyhow::Error::new(error).context(format!(
+                "open EPUB for dimensions '{}': {debug}",
                 file_path.display()
             ))
         })?;
@@ -887,7 +911,7 @@ fn analyze_epub_media_pages(
         files: analysis.files,
         media_files,
         metadata_sources: CapturedMetadataSources {
-            comicinfo: capture_comicinfo(&mut archive, request.comicinfo),
+            comicinfo: capture_comicinfo(archive.as_mut(), request.comicinfo),
             epub: if request.epub {
                 analysis
                     .package_document
@@ -918,7 +942,11 @@ fn analyze_mobi_media_pages(
     profile: MediaAnalysisProfile,
 ) -> anyhow::Result<AnalyzedMediaFileContents> {
     let bytes = std::fs::read(file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("read MOBI file '{}': ", file_path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "read MOBI file '{}': {debug}",
+            file_path.display()
+        ))
     })?;
     let publication = normalize_mobi(&bytes).map_err(|error| {
         anyhow::anyhow!(error).context(format!("normalize MOBI file '{}': ", file_path.display()))
@@ -1205,14 +1233,22 @@ fn detected_media_type_from_path(path: &Path) -> anyhow::Result<String> {
         .unwrap_or_default();
     let fallback = persisted_media_type_from_file_name(file_name);
     let mut file = std::fs::File::open(path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("detect media type '{}': ", path.display()))
+        let debug = format!("{error:?}");
+        anyhow::Error::new(error).context(format!(
+            "detect media type '{}': {debug}",
+            path.display()
+        ))
     })?;
     let mut header = Vec::new();
     file.by_ref()
         .take(IMAGE_DIMENSIONS_MAX_READ_BYTES as u64)
         .read_to_end(&mut header)
         .map_err(|error| {
-            anyhow::anyhow!(error).context(format!("read media header '{}': ", path.display()))
+            let debug = format!("{error:?}");
+            anyhow::Error::new(error).context(format!(
+                "read media header '{}': {debug}",
+                path.display()
+            ))
         })?;
 
     if header.starts_with(b"Rar!\x1A\x07") {

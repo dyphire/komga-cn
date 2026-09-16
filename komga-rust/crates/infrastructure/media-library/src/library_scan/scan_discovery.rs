@@ -10,10 +10,22 @@ use super::scan_models::{
     ScannedSidecarSource, ScannedSidecarType,
 };
 
+pub(super) struct ScannedDirectory {
+    pub path: PathBuf,
+    pub metadata: fs::Metadata,
+    pub file_entries: Vec<ScannedDirectoryFileEntry>,
+}
+
+pub(super) struct ScannedDirectoryFileEntry {
+    pub path: PathBuf,
+    pub metadata: fs::Metadata,
+}
+
 pub(super) fn collect_series_directories(
     current: &Path,
     scan_config: &LibraryScanConfig,
-    discovered: &mut Vec<PathBuf>,
+    discovered: &mut Vec<ScannedDirectory>,
+    failed_directories: &mut Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     if is_hidden_path(current)
         || is_library_path_excluded(current, &scan_config.scan_directory_exclusions)
@@ -21,49 +33,87 @@ pub(super) fn collect_series_directories(
         return Ok(());
     }
 
-    let entries = fs::read_dir(current).map_err(|error| {
-        anyhow::anyhow!(error).context(format!(
-            "failed to scan directory '{}': ",
-            current.display()
-        ))
-    })?;
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) => {
+            // The directory is unreachable (e.g. WebDAV hiccup): record it so
+            // its contents are treated as "unknown" instead of "missing" and
+            // keep scanning the rest of the library.
+            failed_directories.push(current.to_path_buf());
+            tracing::warn!(
+                path = %current.display(),
+                error = %format!("{error:?}"),
+                "scan: skipping unreachable directory"
+            );
+            return Ok(());
+        }
+    };
 
     let mut has_supported_book = false;
     let mut children = Vec::new();
+    let mut file_entries = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to read directory entry in '{}': ",
-                current.display()
-            ))
-        })?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                // Reading this entry failed: the directory contents are
+                // incomplete, so protect the whole directory from deletion.
+                failed_directories.push(current.to_path_buf());
+                tracing::warn!(
+                    path = %current.display(),
+                    error = %format!("{error:?}"),
+                    "scan: directory read interrupted, treating contents as unknown"
+                );
+                break;
+            }
+        };
         let path = entry.path();
-        if is_hidden_path(path.as_path())
-            || is_library_path_excluded(path.as_path(), &scan_config.scan_directory_exclusions)
-        {
+        if is_hidden_path(path.as_path()) {
             continue;
         }
 
-        let metadata = entry.metadata().map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to read metadata for '{}': ",
-                path.display()
-            ))
-        })?;
-        if metadata.is_file() && is_supported_book_file(path.as_path(), scan_config) {
-            has_supported_book = true;
-        }
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                // This entry's type is unknown: protect this exact path.
+                failed_directories.push(path.clone());
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %format!("{error:?}"),
+                    "scan: skipping entry with unreadable metadata"
+                );
+                continue;
+            }
+        };
         if metadata.is_dir() {
+            if is_library_path_excluded(path.as_path(), &scan_config.scan_directory_exclusions) {
+                continue;
+            }
             children.push(path);
+        } else if metadata.is_file() {
+            if is_supported_book_file(path.as_path(), scan_config) {
+                has_supported_book = true;
+            }
+            file_entries.push(ScannedDirectoryFileEntry { path, metadata });
         }
     }
 
     if has_supported_book {
-        discovered.push(current.to_path_buf());
+        let directory_metadata = fs::metadata(current).map_err(|error| {
+            anyhow::anyhow!("{error:?}").context(format!(
+                "failed to read series directory metadata for '{}': ",
+                current.display()
+            ))
+        })?;
+        discovered.push(ScannedDirectory {
+            path: current.to_path_buf(),
+            metadata: directory_metadata,
+            file_entries,
+        });
     }
 
     for child in children {
-        collect_series_directories(child.as_path(), scan_config, discovered)?;
+        collect_series_directories(child.as_path(), scan_config, discovered, failed_directories)?;
     }
 
     Ok(())
