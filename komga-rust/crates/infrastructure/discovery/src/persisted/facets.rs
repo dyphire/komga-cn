@@ -431,31 +431,19 @@ pub(super) async fn load_persisted_series_release_dates(
         &query_values::ScopedStringQuery {
             library_ids,
             collection_ids,
-            label: "series-release-dates",
-            base_sql: r#"SELECT DISTINCT bma.RELEASE_DATE AS VALUE
+            label: "series-release-years",
+            base_sql: r#"SELECT DISTINCT strftime('%Y', bma.RELEASE_DATE) AS VALUE
         FROM BOOK_METADATA_AGGREGATION bma
         JOIN SERIES s ON s.ID = bma.SERIES_ID"#,
             collection_join: r#" JOIN COLLECTION_SERIES cs ON cs.SERIES_ID = s.ID"#,
             library_column: r#"s.LIBRARY_ID"#,
             extra_condition: Some("bma.RELEASE_DATE IS NOT NULL AND bma.RELEASE_DATE <> ''"),
-            order_by: Some("bma.RELEASE_DATE DESC"),
+            order_by: Some("strftime('%Y', bma.RELEASE_DATE) DESC"),
         },
     )
     .await?;
 
-    let mut years = Vec::new();
-    for value in values {
-        let year = value
-            .split('-')
-            .next()
-            .unwrap_or(value.as_str())
-            .to_string();
-        if !years.contains(&year) {
-            years.push(year);
-        }
-    }
-
-    Ok(years)
+    Ok(values)
 }
 
 pub(super) async fn load_persisted_series_tags(

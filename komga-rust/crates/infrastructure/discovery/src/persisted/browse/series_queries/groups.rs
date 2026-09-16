@@ -7,6 +7,7 @@ use super::super::grouping::first_group_key;
 use super::super::models::{
     PersistedSeriesBrowseQuery, PersistedSeriesSortMode, SeriesFilterCriteria,
 };
+use super::super::sql_pushdown;
 use super::super::{DiscoveryQueryContext, SqliteDiscoveryBrowseService};
 use super::filtering::load_persisted_series_page;
 
@@ -16,22 +17,32 @@ pub(in crate::persisted::browse) async fn load_persisted_alphabetical_groups(
     condition: Option<SeriesCondition>,
     full_text_search: Option<String>,
 ) -> anyhow::Result<Vec<SeriesAlphabeticalGroup>> {
-    let page = load_persisted_series_page(
-        backend,
-        context,
-        PersistedSeriesBrowseQuery::from_filters(
-            SeriesFilterCriteria::default(),
-            full_text_search,
-            0,
-            usize::MAX,
-            true,
-            vec![PersistedSeriesSortMode::TitleAsc],
-        )
-        .with_condition(condition),
+    let query = PersistedSeriesBrowseQuery::from_filters(
+        SeriesFilterCriteria::default(),
+        full_text_search,
+        0,
+        usize::MAX,
+        true,
+        vec![PersistedSeriesSortMode::TitleAsc],
     )
-    .await?;
+    .with_condition(condition);
 
     let mut counts = BTreeMap::<String, i64>::new();
+    // Lightweight path: a single GROUP BY SQL aggregates the title-sort first
+    // character (Kotlin countByFirstCharacter equivalent), returning only the
+    // per-group counts instead of every visible series row.
+    // Falls back to the full summaries load when the translator cannot push
+    // down (unsupported conditions, e.g. regex).
+    if let Some(groups) =
+        sql_pushdown::try_load_series_groups(backend, context, &query).await?
+    {
+        return Ok(groups
+            .into_iter()
+            .map(|(group, count)| SeriesAlphabeticalGroup { group, count })
+            .collect());
+    }
+
+    let page = load_persisted_series_page(backend, context, query).await?;
     for series in page.content {
         let group = first_group_key(&series.title_sort);
         *counts.entry(group).or_insert(0) += 1;
