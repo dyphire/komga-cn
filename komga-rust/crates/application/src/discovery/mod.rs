@@ -25,11 +25,13 @@ pub use browse_engine::{
     AuthorEntry, BookBrowseQuery, BookEvaluationContext, BookPosterRow, BookRow, BookSortMode,
     BrowseContext, PageEnvelope as BrowsePageEnvelope, ReadProgressRow, SeriesBrowseQuery,
     SeriesEvaluationContext, SeriesReadProgressCounts, SeriesRow, SeriesSortMode, WebLinkEntry,
-    book_condition_needs_posters, book_condition_needs_readlist_memberships,
+    book_condition_is_lightweight, book_condition_needs_posters,
+    book_condition_needs_readlist_memberships, book_value_condition_is_lightweight,
     collect_book_release_date_offsets, collect_series_release_date_offsets,
-    filter_and_paginate_books, filter_and_paginate_series,
+    evaluate_book_condition, evaluate_series_condition, filter_and_paginate_books,
+    filter_and_paginate_series, series_condition_is_lightweight,
     series_condition_needs_collection_memberships, series_condition_needs_read_progress,
-    series_condition_needs_total_book_counts,
+    series_condition_needs_total_book_counts, series_value_condition_is_lightweight,
 };
 pub use collections::{
     CollectionCreateResult, CollectionListQuery, CollectionMutationError, CollectionMutationInput,
