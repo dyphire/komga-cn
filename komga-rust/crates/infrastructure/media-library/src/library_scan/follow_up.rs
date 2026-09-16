@@ -9,7 +9,8 @@ use sqlx::SqlitePool;
 use crate::library_scan::{LibraryScanResult, enqueue_sidecar_refresh_tasks};
 use crate::maintenance::persistence::{
     load_books_for_extension_repair, load_books_requiring_analysis,
-    load_books_with_missing_file_hash, load_library_hashing_flags, load_library_maintenance_flags,
+    load_books_with_missing_any_file_hash, load_library_hashing_flags,
+    load_library_maintenance_flags,
 };
 
 pub(super) struct ScanFollowUpPlanner {
@@ -57,8 +58,12 @@ impl ScanFollowUpPlanner {
             }
         }
 
-        if hashing_flags.hash_files {
-            let book_ids = load_books_with_missing_file_hash(&self.pool, library_id, false)
+        // One task per book missing any of the configured file hashes: the
+        // hash_book task computes every missing hash (FILE_HASH and/or
+        // FILE_HASH_KOREADER) in a single streaming read, so books that need
+        // both are not read twice.
+        if hashing_flags.hash_files || hashing_flags.hash_koreader {
+            let book_ids = load_books_with_missing_any_file_hash(&self.pool, library_id)
                 .await
                 .map_err(|error| {
                     TaskProcessingError::runtime(format!(
@@ -70,26 +75,6 @@ impl ScanFollowUpPlanner {
                     TaskRequest::with_payload(TaskKind::HashBook, BookPayload::new(book_id))
                         .priority(LOWEST_PRIORITY)
                         .into_queue_record(),
-                );
-            }
-        }
-
-        if hashing_flags.hash_koreader {
-            let book_ids = load_books_with_missing_file_hash(&self.pool, library_id, true)
-                .await
-                .map_err(|error| {
-                    TaskProcessingError::runtime(format!(
-                        "load books with missing koreader hash: {error}"
-                    ))
-                })?;
-            for book_id in book_ids {
-                follow_up_tasks.push(
-                    TaskRequest::with_payload(
-                        TaskKind::HashBookKoreader,
-                        BookPayload::new(book_id),
-                    )
-                    .priority(LOWEST_PRIORITY)
-                    .into_queue_record(),
                 );
             }
         }

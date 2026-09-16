@@ -1,13 +1,19 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{ErrorKind, Read};
-use std::path::PathBuf;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use komga_application::task_processing::{HashedPageToDeletePayload, TaskProcessingError};
 use komga_domain::discovery::MediaStatus;
+use tokio::sync::Mutex;
+use tokio::task;
+use zip::CompressionMethod;
+use zip::write::{SimpleFileOptions, ZipWriter};
 use zip::ZipArchive;
 
-use super::archive::{StoredArchiveEntry, build_stored_zip_archive, metadata_updated_unix_seconds};
+use super::archive::metadata_updated_unix_seconds;
 use super::persistence::{
     PersistedHashedPageToDelete, load_book_archive_source as load_persisted_book_archive_source,
     load_book_hashed_pages as load_persisted_book_hashed_pages,
@@ -15,6 +21,12 @@ use super::persistence::{
 use super::updates::{persist_duplicate_page_deleted_events, persist_removed_hashed_pages};
 use crate::MediaLibraryJobContext;
 use crate::analysis::{is_supported_page_image_file_name, media_type_from_entry_name};
+
+static REWRITE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+static REWRITE_LOCKS: std::sync::LazyLock<
+    tokio::sync::Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
 
 pub type HashedPageToDelete = HashedPageToDeletePayload;
 
@@ -95,7 +107,7 @@ pub async fn remove_hashed_pages(
     }
 
     let removed_pages =
-        rewrite_zip_book_without_pages(&source.file_path, pages_to_remove.as_slice())?;
+        rewrite_zip_book_without_pages(&source.file_path, pages_to_remove.as_slice()).await?;
     if removed_pages.is_empty() {
         return Ok(false);
     }
@@ -230,9 +242,31 @@ fn matching_hashed_pages_to_remove(
         .collect()
 }
 
-pub(crate) fn rewrite_zip_book_without_pages(
+pub(crate) async fn rewrite_zip_book_without_pages(
     archive_path: &PathBuf,
     pages_to_delete: &[HashedPageToDelete],
+) -> Result<Vec<HashedPageToDelete>, TaskProcessingError> {
+    let rewrite_guard = acquire_rewrite_lock(archive_path).await;
+
+    let archive_path = archive_path.clone();
+    let pages_to_delete = pages_to_delete.to_vec();
+    let display_path = archive_path.display().to_string();
+
+    task::spawn_blocking(move || {
+        rewrite_zip_book_without_pages_sync(&archive_path, &pages_to_delete, rewrite_guard)
+    })
+    .await
+    .map_err(|error| {
+        TaskProcessingError::runtime(format!(
+            "page-removal rewrite task panicked for '{display_path}': {error}"
+        ))
+    })?
+}
+
+fn rewrite_zip_book_without_pages_sync(
+    archive_path: &Path,
+    pages_to_delete: &[HashedPageToDelete],
+    _rewrite_guard: RewriteLockGuard,
 ) -> Result<Vec<HashedPageToDelete>, TaskProcessingError> {
     let source_file = fs::File::open(archive_path).map_err(|error| {
         TaskProcessingError::runtime(format!(
@@ -252,12 +286,12 @@ pub(crate) fn rewrite_zip_book_without_pages(
         delete_by_page_number.insert(page.page_number, page.clone());
     }
 
-    let mut kept_entries = Vec::<StoredArchiveEntry>::new();
-    let mut removed_pages = Vec::<HashedPageToDelete>::new();
+    let mut removed_pages = Vec::new();
     let mut page_number = 0_i64;
+    let mut retained_entries = 0_usize;
 
     for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| {
+        let entry = archive.by_index(index).map_err(|error| {
             TaskProcessingError::runtime(format!(
                 "failed to read zip entry index {index} for '{}': {error}",
                 archive_path.display(),
@@ -289,51 +323,109 @@ pub(crate) fn rewrite_zip_book_without_pages(
             None
         };
 
-        if let Some(removed) = should_remove {
-            removed_pages.push(removed);
-            continue;
+        match should_remove {
+            Some(removed) => removed_pages.push(removed),
+            None => retained_entries += 1,
         }
+    }
 
-        let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).map_err(|error| {
+    if removed_pages.is_empty() || removed_pages.len() != pages_to_delete.len() {
+        return Ok(Vec::new());
+    }
+
+    if retained_entries == 0 {
+        return Ok(Vec::new());
+    }
+
+    let temp_path = unique_rewrite_temp_path(archive_path);
+    let temp_file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .map_err(|error| {
             TaskProcessingError::runtime(format!(
-                "failed to read zip entry '{}' bytes for '{}': {error}",
-                entry_name,
-                archive_path.display(),
+                "failed to create temporary archive '{}': {error}",
+                temp_path.display(),
             ))
         })?;
-        kept_entries.push(StoredArchiveEntry {
-            file_name: entry_name,
-            bytes,
-        });
-    }
+    let mut zip_writer = ZipWriter::new(temp_file);
+
+    let rewrite_result = (|| -> Result<(), TaskProcessingError> {
+        let mut page_number = 0_i64;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(|error| {
+                TaskProcessingError::runtime(format!(
+                    "failed to read zip entry index {index} for '{}': {error}",
+                    archive_path.display(),
+                ))
+            })?;
+            if entry.is_dir() {
+                continue;
+            }
+
+            let entry_name = entry
+                .name()
+                .map_err(|error| {
+                    TaskProcessingError::runtime(format!(
+                        "failed to read zip entry name index {index} for '{}': {error}",
+                        archive_path.display(),
+                    ))
+                })?
+                .into_owned();
+            let should_remove = if is_supported_page_image_file_name(&entry_name) {
+                page_number += 1;
+                delete_by_page_number
+                    .get(&page_number)
+                    .filter(|candidate| {
+                        candidate.file_name == entry_name
+                            && candidate.media_type == media_type_from_entry_name(&entry_name)
+                    })
+                    .is_some()
+            } else {
+                false
+            };
+
+            if should_remove {
+                continue;
+            }
+
+            let options = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Stored)
+                .unix_permissions(0o644);
+
+            zip_writer.start_file(&entry_name, options).map_err(|error| {
+                TaskProcessingError::runtime(format!(
+                    "failed to start zip entry '{}' for '{}': {error}",
+                    entry_name,
+                    archive_path.display(),
+                ))
+            })?;
+            std::io::copy(&mut entry, &mut zip_writer).map_err(|error| {
+                TaskProcessingError::runtime(format!(
+                    "failed to copy zip entry '{}' for '{}': {error}",
+                    entry_name,
+                    archive_path.display(),
+                ))
+            })?;
+        }
+        Ok(())
+    })();
 
     // Windows refuses to replace the archive while the source ZIP reader still owns the file.
     drop(archive);
-
-    if removed_pages.is_empty() {
-        return Ok(Vec::new());
+    if let Err(error) = rewrite_result {
+        drop(zip_writer);
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
     }
-
-    if removed_pages.len() != pages_to_delete.len() {
-        return Ok(Vec::new());
-    }
-
-    if kept_entries.is_empty() {
-        return Err(TaskProcessingError::runtime(format!(
-            "refused to rewrite '{}' with zero entries after page deletion",
-            archive_path.display(),
-        )));
-    }
-
-    let rewritten = build_stored_zip_archive(kept_entries)?;
-    let temp_path = archive_path.with_extension("komga-page-removal.tmp");
-    fs::write(&temp_path, rewritten).map_err(|error| {
+    zip_writer.finish().map_err(|error| {
+        let _ = fs::remove_file(&temp_path);
         TaskProcessingError::runtime(format!(
-            "failed to write temporary rewritten archive '{}': {error}",
+            "failed to finalize temporary archive '{}': {error}",
             temp_path.display(),
         ))
     })?;
+
     fs::rename(&temp_path, archive_path).map_err(|error| {
         let _ = fs::remove_file(&temp_path);
         TaskProcessingError::runtime(format!(
@@ -344,6 +436,64 @@ pub(crate) fn rewrite_zip_book_without_pages(
     })?;
 
     Ok(removed_pages)
+}
+
+fn unique_rewrite_temp_path(archive_path: &Path) -> PathBuf {
+    let parent = archive_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = archive_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("archive");
+    let extension = archive_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tmp");
+    let counter = REWRITE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(
+        "{stem}.komga-page-removal.{}-{counter}.{extension}.tmp",
+        std::process::id(),
+    ))
+}
+
+struct RewriteLockGuard {
+    path: PathBuf,
+    mutex: Arc<Mutex<()>>,
+    _held: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl Drop for RewriteLockGuard {
+    fn drop(&mut self) {
+        // Best-effort cleanup of the per-path entry when no other callers
+        // still reference the mutex. The entry will be reused on the next call
+        // regardless, so we skip cleanup if the registry is already locked.
+        if let Ok(mut locks) = REWRITE_LOCKS.try_lock() {
+            if let Some(current) = locks.get(&self.path) {
+                if Arc::ptr_eq(current, &self.mutex) {
+                    if Arc::strong_count(&self.mutex) <= 2 {
+                        locks.remove(&self.path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn acquire_rewrite_lock(archive_path: &Path) -> RewriteLockGuard {
+    let key = archive_path.to_path_buf();
+    let registry: &'static tokio::sync::Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> = &*REWRITE_LOCKS;
+    let mutex: Arc<Mutex<()>> = {
+        let mut locks = registry.lock().await;
+        locks
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let held = mutex.clone().lock_owned().await;
+    RewriteLockGuard {
+        path: key,
+        mutex,
+        _held: held,
+    }
 }
 
 #[cfg(test)]

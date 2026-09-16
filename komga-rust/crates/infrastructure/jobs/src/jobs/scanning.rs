@@ -47,9 +47,8 @@ pub(crate) async fn execute_hash_book_pages(
 pub(crate) async fn execute_hash_book(
     runtime: &JobRuntime<'_>,
     book_id: &str,
-    koreader: bool,
 ) -> Result<TaskExecutionOutcome, TaskProcessingError> {
-    hash_book(runtime.media_library(), book_id, koreader).await?;
+    hash_book(runtime.media_library(), book_id).await?;
 
     Ok(TaskExecutionOutcome::completed())
 }

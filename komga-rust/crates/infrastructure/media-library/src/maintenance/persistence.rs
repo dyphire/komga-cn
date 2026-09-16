@@ -460,42 +460,28 @@ pub(crate) async fn load_books_requiring_analysis(
     Ok(result)
 }
 
-pub(crate) async fn load_books_with_missing_file_hash(
+pub(crate) async fn load_books_with_missing_any_file_hash(
     pool: &SqlitePool,
     library_id: &str,
-    koreader: bool,
 ) -> anyhow::Result<Vec<String>> {
-    let query = if koreader {
-        sqlx::query(
-            r#"
-            SELECT ID
-            FROM BOOK
-            WHERE LIBRARY_ID = ?
-            AND DELETED_DATE IS NULL
-            AND (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL)
-            "#,
-        )
-    } else {
-        sqlx::query(
-            r#"
-            SELECT ID
-            FROM BOOK
-            WHERE LIBRARY_ID = ?
-            AND DELETED_DATE IS NULL
-            AND (FILE_HASH = '' OR FILE_HASH IS NULL)
-            "#,
-        )
-    };
-
-    let rows = query
-        .bind(library_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(error).context(format!(
-                "failed to query books with missing file hash for '{library_id}': "
-            ))
-        })?;
+    let rows = sqlx::query(
+        r#"
+        SELECT ID
+        FROM BOOK
+        WHERE LIBRARY_ID = ?
+        AND DELETED_DATE IS NULL
+        AND ((FILE_HASH = '' OR FILE_HASH IS NULL)
+             OR (FILE_HASH_KOREADER = '' OR FILE_HASH_KOREADER IS NULL))
+        "#,
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| {
+        anyhow::anyhow!(error).context(format!(
+            "failed to query books with missing file hash for '{library_id}': "
+        ))
+    })?;
 
     Ok(rows
         .into_iter()

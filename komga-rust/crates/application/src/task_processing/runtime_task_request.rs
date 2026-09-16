@@ -14,7 +14,6 @@ pub enum RuntimeTaskRequest {
     },
     HashBook {
         book_id: String,
-        koreader: bool,
     },
     FindBooksWithMissingPageHash {
         library_id: String,
@@ -98,13 +97,8 @@ impl RuntimeTaskRequest {
             TaskKind::HashBookPages => Ok(Self::HashBookPages {
                 book_id: required_target(target, "HashBookPages task must include a book id")?,
             }),
-            TaskKind::HashBook => Ok(Self::HashBook {
+            TaskKind::HashBook | TaskKind::HashBookKoreader => Ok(Self::HashBook {
                 book_id: required_target(target, "HashBook task must include a book id")?,
-                koreader: false,
-            }),
-            TaskKind::HashBookKoreader => Ok(Self::HashBook {
-                book_id: required_target(target, "HashBookKoreader task must include a book id")?,
-                koreader: true,
             }),
             TaskKind::FindBooksWithMissingPageHash => Ok(Self::FindBooksWithMissingPageHash {
                 library_id: required_target(

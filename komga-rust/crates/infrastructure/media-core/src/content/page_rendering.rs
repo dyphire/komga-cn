@@ -65,7 +65,7 @@ pub async fn resolve_book_page_bytes(
     if let Some(bytes) = read_zip_archive_page_bytes(media, page, page_number).await? {
         return Ok(Some(bytes));
     }
-    if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number)? {
+    if let Some(bytes) = read_rar_archive_page_bytes(media, page, page_number).await? {
         return Ok(Some(bytes));
     }
     Ok(None)
@@ -85,7 +85,10 @@ pub async fn render_book_page_thumbnail(
     let Some(bytes) = resolve_book_page_bytes(media, page, page_number).await? else {
         return Ok(None);
     };
-    render_image_thumbnail(&bytes, max_edge, output_format).map(Some)
+    tokio::task::spawn_blocking(move || render_image_thumbnail(bytes, max_edge, output_format))
+        .await
+        .context("join image thumbnail render task")?
+        .map(Some)
 }
 
 pub async fn load_archive_page_row(
@@ -113,7 +116,10 @@ pub async fn load_archive_page_rows(
         return load_zip_archive_page_rows(media).await;
     }
     if book_media_is_rar_archive(media) {
-        return load_rar_archive_page_rows(media);
+        let file_path = media.file_path.clone();
+        return tokio::task::spawn_blocking(move || load_rar_archive_page_rows(&file_path))
+            .await
+            .context("join rar archive row read task")?;
     }
     Ok(None)
 }
@@ -188,27 +194,77 @@ fn render_pdf_page_blocking(
     page_number: u64,
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<Option<RenderedImage>> {
-    let document = PdfDocument::load(&media.file_path).map_err(|error| {
-        anyhow::anyhow!(error).context(format!("open pdf '{}': ", media.file_path.display()))
+    // Resolve page dimensions from the Pdfium document itself instead of
+    // re-parsing the whole PDF with lopdf: Pdfium reports the page size in the
+    // same PDF points used by the MediaBox, so the single Pdfium load below
+    // serves both sizing and rendering.
+    let pdfium = load_pdfium()?;
+    let document = pdfium
+        .load_pdf_from_file(&media.file_path, None)
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "open pdf '{}' for page rendering: ",
+                media.file_path.display()
+            ))
+        })?;
+    let page_index = i32::try_from(page_number.saturating_sub(1)).map_err(|error| {
+        anyhow::anyhow!(error).context(format!("convert pdf page number {page_number}"))
     })?;
-    if !document.get_pages().contains_key(&(page_number as u32)) {
-        return Ok(None);
-    }
-    let dimensions = pdf_page_dimensions(&document, page_number as u32)
-        .map(scale_pdf_page_dimensions)
-        .unwrap_or(PdfPageDimensions {
+    let page = match document.pages().get(page_index) {
+        Ok(page) => page,
+        Err(PdfiumError::PageIndexOutOfBounds) => return Ok(None),
+        Err(error) => {
+            return Err(anyhow::anyhow!(error).context(format!(
+                "load pdf page {page_number} from '{}': ",
+                media.file_path.display()
+            )))
+        }
+    };
+
+    let dimensions = PdfPageDimensions {
+        width: page.width().value.round().max(0.0) as u32,
+        height: page.height().value.round().max(0.0) as u32,
+    };
+    let dimensions = if dimensions.width > 0 && dimensions.height > 0 {
+        scale_pdf_page_dimensions(dimensions)
+    } else {
+        PdfPageDimensions {
             width: PDF_MAX_RENDER_EDGE,
             height: PDF_MAX_RENDER_EDGE,
-        });
+        }
+    };
 
-    render_pdf_page_at_size(
-        media,
-        page_number,
-        dimensions.width,
-        dimensions.height,
+    let rendered = page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(i32::try_from(dimensions.width).unwrap_or(i32::MAX))
+                .set_maximum_height(i32::try_from(dimensions.height).unwrap_or(i32::MAX)),
+        )
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "render pdf page {page_number} from '{}': ",
+                media.file_path.display()
+            ))
+        })?
+        .as_image()
+        .map_err(|error| {
+            anyhow::anyhow!(error).context(format!(
+                "convert pdf page {page_number} from '{}' to image: ",
+                media.file_path.display()
+            ))
+        })?
+        .into_rgb8();
+
+    let image = image::DynamicImage::ImageRgb8(rendered);
+    encode_image_with_jpeg_fallback(
+        &image,
         output_format,
-        "page",
+        &format!(
+            "encode pdf page {page_number} page from '{}': ",
+            media.file_path.display()
+        ),
     )
+    .map(Some)
 }
 
 pub fn read_pdf_page_as_single_page_pdf(
@@ -331,12 +387,12 @@ async fn render_pdf_page_thumbnail(
 }
 
 fn render_image_thumbnail(
-    bytes: &[u8],
+    bytes: Vec<u8>,
     max_edge: u32,
     output_format: ImageOutputFormat,
 ) -> anyhow::Result<RenderedImage> {
     let image =
-        image::load_from_memory(bytes).context("render image thumbnail: decode image bytes")?;
+        image::load_from_memory(&bytes).context("render image thumbnail: decode image bytes")?;
     let dimensions = RasterImageDimensions::from_image(&image);
     let resized = if dimensions.max_edge() > max_edge {
         image.resize(max_edge, max_edge, FilterType::Lanczos3)
@@ -604,13 +660,13 @@ async fn load_zip_archive_page_rows(
 }
 
 fn load_rar_archive_page_rows(
-    media: &BookMediaRecord,
+    file_path: &Path,
 ) -> anyhow::Result<Option<Vec<BookPageRecord>>> {
-    let rows = list_rar_entries(&media.file_path)
+    let rows = list_rar_entries(file_path)
         .map_err(|error| {
             anyhow::anyhow!(error).context(format!(
                 "read rar archive '{}': ",
-                media.file_path.display()
+                file_path.display()
             ))
         })?
         .into_iter()
@@ -628,7 +684,7 @@ fn load_rar_archive_page_rows(
     Ok((!rows.is_empty()).then_some(rows))
 }
 
-fn read_rar_archive_page_bytes(
+async fn read_rar_archive_page_bytes(
     media: &BookMediaRecord,
     page: &BookPageRecord,
     page_number: u64,
@@ -636,23 +692,29 @@ fn read_rar_archive_page_bytes(
     if !book_media_is_rar_archive(media) || page_number == 0 {
         return Ok(None);
     }
-    if !page.file_name.is_empty()
-        && let Some(bytes) = read_rar_entry_bytes(&media.file_path, &page.file_name)?
-    {
-        return Ok(Some(bytes));
-    }
+    let file_path = media.file_path.clone();
+    let file_name = page.file_name.clone();
     let page_index = usize::try_from(page_number.saturating_sub(1)).map_err(|error| {
         anyhow::anyhow!(error).context(format!("convert rar page number {page_number}"))
     })?;
-    let Some(page_file_name) = load_rar_archive_page_rows(media)?
-        .unwrap_or_default()
-        .into_iter()
-        .nth(page_index)
-        .map(|row| row.file_name)
-    else {
-        return Ok(None);
-    };
-    read_rar_entry_bytes(&media.file_path, &page_file_name)
+    tokio::task::spawn_blocking(move || {
+        if !file_name.is_empty()
+            && let Some(bytes) = read_rar_entry_bytes(&file_path, &file_name)?
+        {
+            return Ok(Some(bytes));
+        }
+        let Some(page_file_name) = load_rar_archive_page_rows(&file_path)?
+            .unwrap_or_default()
+            .into_iter()
+            .nth(page_index)
+            .map(|row| row.file_name)
+        else {
+            return Ok(None);
+        };
+        read_rar_entry_bytes(&file_path, &page_file_name)
+    })
+    .await
+    .context("join rar archive page read task")?
 }
 
 pub async fn read_media_file_bytes(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {

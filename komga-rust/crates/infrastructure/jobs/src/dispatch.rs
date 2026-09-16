@@ -35,8 +35,8 @@ impl<'a> TaskJobDispatcher<'a> {
             RuntimeTaskRequest::HashBookPages { book_id } => {
                 super::jobs::execute_hash_book_pages(&self.runtime, &book_id).await
             }
-            RuntimeTaskRequest::HashBook { book_id, koreader } => {
-                super::jobs::execute_hash_book(&self.runtime, &book_id, koreader).await
+            RuntimeTaskRequest::HashBook { book_id } => {
+                super::jobs::execute_hash_book(&self.runtime, &book_id).await
             }
             RuntimeTaskRequest::FindBooksWithMissingPageHash {
                 library_id,
