@@ -1,5 +1,6 @@
 use crate::cache::{
-    asset_not_modified_response, file_last_modified_header_value, if_modified_since_matches,
+    asset_file_etag, asset_not_modified_response, file_last_modified_header_value,
+    if_modified_since_matches,
 };
 use crate::contracts::media_assets::BookPageDto;
 use crate::helpers::spring_error_response;
@@ -425,9 +426,17 @@ fn asset_response(
         })
         .flatten();
 
+    let file_etag = include_etag.then(|| {
+        asset
+            .source_file
+            .as_deref()
+            .zip(asset.etag_key.as_deref())
+            .and_then(|(path, key)| asset_file_etag(path, key))
+    });
+
     let mut response = MediaAssetResponse::new(asset.content_type, asset.bytes);
     if include_etag {
-        response = response.with_etag();
+        response = response.with_file_etag(file_etag.flatten());
     }
 
     let response = if vary_accept {

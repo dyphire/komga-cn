@@ -1,6 +1,7 @@
 use super::shared::{
-    load_collection_mosaic_bytes, parse_thumbnail_upload, response_from_thumbnail_bytes,
-    response_from_thumbnail_jpeg_bytes, set_one_hour_private_cache_control, thumbnail_dimensions,
+    load_collection_mosaic_bytes, mosaic_dimensions, mosaic_inflight_finish, mosaic_inflight_start,
+    parse_thumbnail_upload, response_from_thumbnail_bytes, response_from_thumbnail_jpeg_bytes,
+    set_one_hour_private_cache_control, thumbnail_dimensions,
 };
 use axum::Json;
 use axum::extract::{Path, State};
@@ -29,6 +30,35 @@ async fn ensure_collection_exists(
     }
 }
 
+async fn generate_collection_mosaic(
+    app: &MediaAssetsState,
+    headers: &HeaderMap,
+    collection_id: &str,
+    visible_series_ids: Vec<String>,
+) -> Response {
+    match load_collection_mosaic_bytes(app, visible_series_ids).await {
+        Ok(Some(bytes)) => {
+            let (width, height) = mosaic_dimensions();
+            if let Err(error) = app
+                .thumbnails
+                .insert_generated_collection(collection_id, &bytes, "image/jpeg", width, height)
+                .await
+            {
+                tracing::warn!(
+                    collection_id,
+                    %error,
+                    "failed to persist generated collection thumbnail"
+                );
+            }
+            let mut response = response_from_thumbnail_bytes(headers, bytes, "image/jpeg");
+            set_one_hour_private_cache_control(&mut response);
+            response
+        }
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error_response(error),
+    }
+}
+
 pub(crate) async fn collection_thumbnail(
     State(app): State<MediaAssetsState>,
     Authenticated(user): Authenticated,
@@ -52,22 +82,53 @@ pub(crate) async fn collection_thumbnail(
         .await
     {
         Ok(rows) => {
-            if let Some(thumbnail) = rows.first() {
+            if let Some(thumbnail) = rows.into_iter().next() {
                 let mut response =
-                    response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail.clone());
+                    response_from_thumbnail_jpeg_bytes(&headers, thumbnail.thumbnail);
                 set_one_hour_private_cache_control(&mut response);
                 return response;
             }
 
-            match load_collection_mosaic_bytes(&app, visible_series_ids).await {
-                Ok(Some(bytes)) => {
-                    let mut response = response_from_thumbnail_bytes(&headers, bytes, "image/jpeg");
-                    set_one_hour_private_cache_control(&mut response);
-                    response
-                }
-                Ok(None) => StatusCode::NOT_FOUND.into_response(),
-                Err(error) => internal_error_response(error),
+            // No persisted thumbnail: generate once, deduplicated across
+            // concurrent requests for the same collection, and persist the result.
+            let key = format!("collection-{collection_id}");
+            let (should_generate, notify) = mosaic_inflight_start(&key);
+            if should_generate {
+                let response = generate_collection_mosaic(
+                    &app,
+                    &headers,
+                    &collection_id,
+                    visible_series_ids,
+                )
+                .await;
+                mosaic_inflight_finish(&key);
+                return response;
             }
+            if let Some(notify) = notify {
+                // Another request is generating it; wait, then re-read the
+                // persisted thumbnail.
+                notify.notified().await;
+                return match app
+                    .thumbnail_reader
+                    .collection_thumbnails(&collection_id)
+                    .await
+                {
+                    Ok(rows) => {
+                        if let Some(thumbnail) = rows.into_iter().next() {
+                            let mut response = response_from_thumbnail_jpeg_bytes(
+                                &headers,
+                                thumbnail.thumbnail,
+                            );
+                            set_one_hour_private_cache_control(&mut response);
+                            response
+                        } else {
+                            StatusCode::NOT_FOUND.into_response()
+                        }
+                    }
+                    Err(error) => internal_error_response(error),
+                };
+            }
+            StatusCode::NOT_FOUND.into_response()
         }
         Err(error) => internal_error_response(error),
     }
