@@ -6,11 +6,12 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+komga-domain = { path = "../../domain" }
 getrandom.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["regexp"] }
 tokio.workspace = true
 futures-util.workspace = true
 tracing.workspace = true
