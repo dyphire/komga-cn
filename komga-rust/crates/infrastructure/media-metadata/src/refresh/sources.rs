@@ -278,7 +278,9 @@ pub(super) fn load_mylar_series_patch(
         age_rating: metadata.age_rating.map(mylar_age_rating_value),
         language: None,
         genres: None,
-        total_book_count: u32::try_from(metadata.total_issues).ok(),
+        total_book_count: u32::try_from(metadata.total_issues)
+            .ok()
+            .filter(|count| *count > 0),
         collections: Vec::new(),
     }))
 }
